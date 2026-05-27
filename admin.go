@@ -428,3 +428,13 @@ func (s *AdminService) getAny(ctx context.Context, path string) (map[string]inte
 	}
 	return out, nil
 }
+
+// Impersonate generates a short-lived msi_ token that acts as the given external user.
+// POST /api/v1/admin/impersonate
+func (s *AdminService) Impersonate(ctx context.Context, input ImpersonateInput) (*ImpersonateResult, error) {
+	var out ImpersonateResult
+	if err := s.client.postJSON(ctx, "/admin/impersonate", input, &out); err != nil {
+		return nil, fmt.Errorf("AdminService.Impersonate: %w", err)
+	}
+	return &out, nil
+}

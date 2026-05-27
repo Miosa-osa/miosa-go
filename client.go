@@ -21,7 +21,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "0.3.0"
+	sdkVersion        = "0.5.0"
 )
 
 // ClientOption is a functional option for configuring a Client.
@@ -109,6 +109,12 @@ type Client struct {
 	Audit   *EgressAuditService
 	// Phase 1-4 additions.
 	Quotas *QuotasService
+	// Phase 6 governance.
+	GovernanceTenant     *GovernanceTenantService
+	GovernanceWorkspaces *GovernanceWorkspacesService
+	ExternalUsers        *ExternalUsersGovernanceService
+	Bulk                 *BulkService
+	Billing              *BillingService
 }
 
 // newDefaultTransport builds an *http.Transport tuned for SDK use:
@@ -210,6 +216,25 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.Network = &EgressNetworkService{client: c}
 	c.Audit = &EgressAuditService{client: c}
 	c.Quotas = &QuotasService{client: c}
+	// Phase 6 governance
+	tenantPolicy := &TenantPolicyService{client: c}
+	tenantMembers := &TenantMembersService{client: c}
+	tenantEvents := &TenantEventStreamService{client: c}
+	c.GovernanceTenant = &GovernanceTenantService{
+		client:  c,
+		Policy:  tenantPolicy,
+		Members: tenantMembers,
+		Events:  tenantEvents,
+	}
+	c.GovernanceWorkspaces = &GovernanceWorkspacesService{client: c}
+	c.ExternalUsers = &ExternalUsersGovernanceService{client: c}
+	c.Bulk = &BulkService{
+		Sandboxes: &BulkSandboxesService{client: c},
+		Policy:    &BulkPolicyService{client: c},
+		Jobs:      &BulkJobsService{client: c},
+	}
+	billingInvoices := &BillingInvoicesService{client: c}
+	c.Billing = &BillingService{client: c, Invoices: billingInvoices}
 	return c
 }
 
