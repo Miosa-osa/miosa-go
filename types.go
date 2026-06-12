@@ -26,19 +26,20 @@ const (
 
 // ComputerData is the API representation of a computer resource.
 type ComputerData struct {
-	ID           string             `json:"id"`
-	Name         string             `json:"name"`
-	Slug         string             `json:"slug"`
-	Status       ComputerStatus     `json:"status"`
-	Visibility   ComputerVisibility `json:"visibility"`
-	TemplateType string             `json:"template_type"`
-	Size         ComputerSize       `json:"size"`
-	TenantID     string             `json:"tenant_id"`
-	WorkspaceID  string             `json:"workspace_id"`
-	IPAddress    string             `json:"ip_address"`
-	Metadata     map[string]string  `json:"metadata"`
-	CreatedAt    string             `json:"created_at"`
-	UpdatedAt    string             `json:"updated_at"`
+	ID            string             `json:"id"`
+	Name          string             `json:"name"`
+	Slug          string             `json:"slug"`
+	Status        ComputerStatus     `json:"status"`
+	Visibility    ComputerVisibility `json:"visibility"`
+	TemplateType  string             `json:"template_type"`
+	Size          ComputerSize       `json:"size"`
+	TenantID      string             `json:"tenant_id"`
+	WorkspaceID   string             `json:"workspace_id"`
+	IPAddress     string             `json:"ip_address"`
+	Metadata      map[string]string  `json:"metadata"`
+	PreviewDomain string             `json:"preview_domain"`
+	CreatedAt     string             `json:"created_at"`
+	UpdatedAt     string             `json:"updated_at"`
 }
 
 // CreateComputerInput is the request body for POST /computers.
@@ -931,6 +932,14 @@ const (
 	DeploymentSourceUpload  DeploymentSourceType = "upload"
 )
 
+// DeploymentProduct identifies the runtime product serving a deployment.
+type DeploymentProduct string
+
+const (
+	DeploymentProductMiosaDeploy  DeploymentProduct = "miosa_deploy"
+	DeploymentProductDockerDeploy DeploymentProduct = "docker_deploy"
+)
+
 // DeploymentServiceType — one row per web/api/worker/cron/etc.
 type DeploymentServiceType string
 
@@ -980,6 +989,9 @@ type DeploymentData struct {
 	State               DeploymentState        `json:"state"`
 	AutoDeploy          bool                   `json:"auto_deploy,omitempty"`
 	CustomDomainID      string                 `json:"custom_domain_id,omitempty"`
+	LinkedDatabaseID    string                 `json:"linked_database_id,omitempty"`
+	DeploymentProduct   DeploymentProduct      `json:"deployment_product,omitempty"`
+	DockerDeployHostID  string                 `json:"docker_deploy_host_id,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string                 `json:"external_user_id,omitempty"`

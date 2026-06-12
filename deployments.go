@@ -42,6 +42,7 @@ type CreateDeploymentInput struct {
 	Branch              string                 `json:"branch,omitempty"`
 	BuildCommand        string                 `json:"build_command,omitempty"`
 	RunCommand          string                 `json:"run_command,omitempty"`
+	Database            interface{}            `json:"database,omitempty"`
 	AutoDeploy          *bool                  `json:"auto_deploy,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
@@ -168,6 +169,12 @@ func (s *DeploymentsService) Create(ctx context.Context, input CreateDeploymentI
 	return &env.Data, nil
 }
 
+// CreateDockerDeploy creates a deployment marked for the workspace Docker Deploy appliance.
+func (s *DeploymentsService) CreateDockerDeploy(ctx context.Context, input CreateDeploymentInput) (*DeploymentData, error) {
+	input.Metadata = dockerDeployMetadata(input.Metadata)
+	return s.Create(ctx, input)
+}
+
 // Update patches a deployment.
 func (s *DeploymentsService) Update(ctx context.Context, id string, input UpdateDeploymentInput) (*DeploymentData, error) {
 	var env apiResponse[DeploymentData]
@@ -210,6 +217,34 @@ func (s *DeploymentsService) PublishFromSandbox(ctx context.Context, sandboxID s
 	input.SourceSandboxID = sandboxID
 	var out map[string]interface{}
 	if err := s.client.postJSONIdempotent(ctx, "/sandboxes/"+sandboxID+"/deploy", input, &out, idemKey(input.IdempotencyKey)); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// PublishFromSandboxDocker publishes a sandbox through Docker Deploy.
+func (s *DeploymentsService) PublishFromSandboxDocker(ctx context.Context, sandboxID string, input PublishInput) (map[string]interface{}, error) {
+	input.Kind = firstNonEmpty(input.Kind, "auto")
+	if input.Environment == "" {
+		input.Environment = "production"
+	}
+	body := map[string]interface{}{
+		"source_sandbox_id":     sandboxID,
+		"kind":                  input.Kind,
+		"environment":           input.Environment,
+		"output_path":           input.OutputPath,
+		"build_command":         input.BuildCommand,
+		"run_command":           input.RunCommand,
+		"port":                  input.Port,
+		"health_check_path":     input.HealthCheckPath,
+		"data_services":         input.DataServices,
+		"external_workspace_id": input.ExternalWorkspaceID,
+		"external_user_id":      input.ExternalUserID,
+		"external_project_id":   input.ExternalProjectID,
+		"deployment_type":       "docker_deploy",
+	}
+	var out map[string]interface{}
+	if err := s.client.postJSONIdempotent(ctx, "/sandboxes/"+sandboxID+"/deploy", compactMap(body), &out, idemKey(input.IdempotencyKey)); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -372,4 +407,44 @@ func idemKey(provided string) string {
 		return ""
 	}
 	return hex.EncodeToString(b[:])
+}
+
+func dockerDeployMetadata(metadata map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for k, v := range metadata {
+		out[k] = v
+	}
+	out["deployment_product"] = "docker_deploy"
+	return out
+}
+
+func firstNonEmpty(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func compactMap(in map[string]interface{}) map[string]interface{} {
+	out := map[string]interface{}{}
+	for k, v := range in {
+		switch value := v.(type) {
+		case string:
+			if value != "" {
+				out[k] = value
+			}
+		case int:
+			if value != 0 {
+				out[k] = value
+			}
+		case []string:
+			if len(value) > 0 {
+				out[k] = value
+			}
+		case nil:
+		default:
+			out[k] = value
+		}
+	}
+	return out
 }

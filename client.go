@@ -75,6 +75,8 @@ type Client struct {
 	Webhooks            *WebhooksService
 	SandboxTemplates    *SandboxTemplatesService
 	ApiKeys             *ApiKeysService
+	Tokens              *TokensService
+	DockerDeploy        *DockerDeployService
 	Tenant              *TenantService
 	Regions             *RegionsService
 	Settings            *SettingsService
@@ -185,6 +187,8 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.Webhooks = &WebhooksService{client: c}
 	c.SandboxTemplates = &SandboxTemplatesService{client: c}
 	c.ApiKeys = &ApiKeysService{client: c}
+	c.Tokens = &TokensService{client: c}
+	c.DockerDeploy = &DockerDeployService{client: c}
 	c.Tenant = &TenantService{client: c}
 	c.Regions = &RegionsService{client: c}
 	c.Settings = &SettingsService{client: c}
