@@ -21,7 +21,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "0.5.0"
+	sdkVersion        = "1.2.5"
 )
 
 // ClientOption is a functional option for configuring a Client.
@@ -59,6 +59,7 @@ type Client struct {
 	// Services — populated by NewClient.
 	Computers           *ComputersService
 	Sandboxes           *SandboxesService
+	Devices             *DevicesService
 	Deployments         *DeploymentsService
 	Files               *FilesService
 	Credits             *CreditsService
@@ -171,6 +172,7 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	}
 	c.Computers = &ComputersService{client: c}
 	c.Sandboxes = &SandboxesService{client: c}
+	c.Devices = &DevicesService{client: c}
 	c.Deployments = &DeploymentsService{client: c}
 	c.Files = &FilesService{client: c}
 	c.Credits = &CreditsService{client: c}

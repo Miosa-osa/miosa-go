@@ -59,6 +59,34 @@ func main() {
 }
 ```
 
+## Agent device routing
+
+Use `client.Devices` before launching an orchestration workflow. It helps route
+work across sandbox workers, Computers, local devices, and Docker Deploy hosts
+without hiding the lower-level APIs.
+
+```go
+catalog := client.Devices.Catalog()
+inventory, err := client.Devices.List(ctx, miosa.DeviceListInput{})
+if err != nil {
+    log.Fatal(err)
+}
+_ = catalog
+_ = inventory
+
+// Default for code/build/test/preview work:
+sbx, err := client.Sandboxes.Create(ctx, miosa.CreateSandboxInput{
+    Name:     "builder",
+    Template: "nextjs",
+})
+
+// Use Computers when the agent needs a full browser/desktop:
+desktop, err := client.Computers.Create(ctx, miosa.CreateComputerInput{
+    Name: "browser-agent",
+})
+_ = desktop
+```
+
 ## Computer lifecycle
 
 ```go
