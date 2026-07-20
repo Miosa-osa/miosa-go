@@ -42,7 +42,6 @@ type CreateDeploymentInput struct {
 	Branch              string                 `json:"branch,omitempty"`
 	BuildCommand        string                 `json:"build_command,omitempty"`
 	RunCommand          string                 `json:"run_command,omitempty"`
-	Database            interface{}            `json:"database,omitempty"`
 	AutoDeploy          *bool                  `json:"auto_deploy,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
@@ -105,6 +104,25 @@ type AddDomainInput struct {
 	IdempotencyKey      string `json:"-"`
 }
 
+// DeploymentProofCheck is one read-only assertion about a deployment.
+type DeploymentProofCheck struct {
+	ID       string                 `json:"id"`
+	OK       bool                   `json:"ok"`
+	Message  string                 `json:"message"`
+	Details  map[string]interface{} `json:"details,omitempty"`
+	Recovery []string               `json:"recovery,omitempty"`
+}
+
+// DeploymentProofResult summarizes whether a deployment is really live.
+type DeploymentProofResult struct {
+	OK                bool                   `json:"ok"`
+	Deployment        DeploymentData         `json:"deployment"`
+	DeploymentProduct DeploymentProduct      `json:"deployment_product"`
+	PublicURL         string                 `json:"public_url,omitempty"`
+	Checks            []DeploymentProofCheck `json:"checks"`
+	NextActions       []string               `json:"next_actions,omitempty"`
+}
+
 // ─── List wrappers ───────────────────────────────────────────────────────
 
 // DeploymentListResponse wraps GET /deployments.
@@ -156,6 +174,51 @@ func (s *DeploymentsService) Get(ctx context.Context, id string) (*DeploymentDat
 	return &env.Data, nil
 }
 
+// Prove fetches the deployment and validates the concrete runtime facts.
+func (s *DeploymentsService) Prove(ctx context.Context, deploymentID string) (*DeploymentProofResult, error) {
+	deployment, err := s.Get(ctx, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+
+	checks := []DeploymentProofCheck{}
+	addDeploymentProofChecks(&checks, deployment)
+
+	if deploymentProduct(deployment) == DeploymentProductDockerDeploy {
+		var host *DockerDeployHostData
+		hostID := dockerDeployHostID(deployment)
+		if hostID != "" {
+			var out dockerDeployHostResponse
+			if err := s.client.getJSON(ctx, "/docker-deploy/hosts/"+hostID, &out); err != nil {
+				return nil, err
+			}
+			host = unwrapDockerDeployHost(out)
+		}
+		addDockerDeployProofChecks(&checks, deployment, host)
+	}
+
+	nextActions := []string{}
+	for _, check := range checks {
+		if check.OK {
+			continue
+		}
+		for _, action := range check.Recovery {
+			if !containsString(nextActions, action) {
+				nextActions = append(nextActions, action)
+			}
+		}
+	}
+
+	return &DeploymentProofResult{
+		OK:                allProofChecksOK(checks),
+		Deployment:        *deployment,
+		DeploymentProduct: deploymentProduct(deployment),
+		PublicURL:         deployment.PublicURL,
+		Checks:            checks,
+		NextActions:       nextActions,
+	}, nil
+}
+
 // Create provisions a new deployment.
 func (s *DeploymentsService) Create(ctx context.Context, input CreateDeploymentInput) (*DeploymentData, error) {
 	path := "/deployments"
@@ -169,7 +232,7 @@ func (s *DeploymentsService) Create(ctx context.Context, input CreateDeploymentI
 	return &env.Data, nil
 }
 
-// CreateDockerDeploy creates a deployment marked for the workspace Docker Deploy appliance.
+// CreateDockerDeploy creates a deployment marked for the workspace App Engine appliance.
 func (s *DeploymentsService) CreateDockerDeploy(ctx context.Context, input CreateDeploymentInput) (*DeploymentData, error) {
 	input.Metadata = dockerDeployMetadata(input.Metadata)
 	return s.Create(ctx, input)
@@ -222,7 +285,7 @@ func (s *DeploymentsService) PublishFromSandbox(ctx context.Context, sandboxID s
 	return out, nil
 }
 
-// PublishFromSandboxDocker publishes a sandbox through Docker Deploy.
+// PublishFromSandboxDocker publishes a sandbox through App Engine.
 func (s *DeploymentsService) PublishFromSandboxDocker(ctx context.Context, sandboxID string, input PublishInput) (map[string]interface{}, error) {
 	input.Kind = firstNonEmpty(input.Kind, "auto")
 	if input.Environment == "" {
@@ -447,4 +510,213 @@ func compactMap(in map[string]interface{}) map[string]interface{} {
 		}
 	}
 	return out
+}
+
+func deploymentProduct(deployment *DeploymentData) DeploymentProduct {
+	if deployment.DeploymentProduct != "" {
+		return deployment.DeploymentProduct
+	}
+	if value, ok := deployment.Metadata["deployment_product"].(string); ok && value != "" {
+		return DeploymentProduct(value)
+	}
+	return DeploymentProductMiosaDeploy
+}
+
+func dockerDeployHostID(deployment *DeploymentData) string {
+	if deployment.DockerDeployHostID != "" {
+		return deployment.DockerDeployHostID
+	}
+	if value, ok := deployment.Metadata["docker_deploy_host_id"].(string); ok && value != "" {
+		return value
+	}
+	if deployment.DockerDeployApp != nil {
+		if deployment.DockerDeployApp.DockerDeployHostID != "" {
+			return deployment.DockerDeployApp.DockerDeployHostID
+		}
+		if value, ok := deployment.DockerDeployApp.Metadata["host_id"].(string); ok && value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func addProofCheck(
+	checks *[]DeploymentProofCheck,
+	id string,
+	ok bool,
+	message string,
+	details map[string]interface{},
+	recovery []string,
+) {
+	*checks = append(*checks, DeploymentProofCheck{
+		ID:       id,
+		OK:       ok,
+		Message:  message,
+		Details:  details,
+		Recovery: recovery,
+	})
+}
+
+func addDeploymentProofChecks(checks *[]DeploymentProofCheck, deployment *DeploymentData) {
+	addProofCheck(
+		checks,
+		"deployment_row",
+		true,
+		"Deployment "+deployment.ID+" exists with state="+string(deployment.State)+".",
+		map[string]interface{}{"state": deployment.State},
+		nil,
+	)
+
+	running := deployment.State == DeploymentStateRunning
+	message := "Deployment is marked running."
+	if !running {
+		message = "Deployment state is " + string(deployment.State) + ", expected running."
+	}
+	addProofCheck(
+		checks,
+		"deployment_running",
+		running,
+		message,
+		map[string]interface{}{"state": deployment.State},
+		[]string{"Inspect deployment logs.", "Redeploy the deployment."},
+	)
+
+	publicURLMessage := "Deployment has no public URL."
+	if deployment.PublicURL != "" {
+		publicURLMessage = "Public URL is " + deployment.PublicURL + "."
+	}
+	addProofCheck(
+		checks,
+		"public_url_present",
+		deployment.PublicURL != "",
+		publicURLMessage,
+		map[string]interface{}{"public_url": deployment.PublicURL},
+		nil,
+	)
+	if deployment.PublicURL == "" {
+		(*checks)[len(*checks)-1].Message = "Deployment has no public URL."
+	}
+}
+
+func addDockerDeployProofChecks(
+	checks *[]DeploymentProofCheck,
+	deployment *DeploymentData,
+	host *DockerDeployHostData,
+) {
+	app := deployment.DockerDeployApp
+	hostID := dockerDeployHostID(deployment)
+	hostLinkMessage := "Deployment has no App Engine host id."
+	if hostID != "" {
+		hostLinkMessage = "Deployment links App Engine host " + hostID + "."
+	}
+	addProofCheck(
+		checks,
+		"docker_deploy_host_link",
+		hostID != "",
+		hostLinkMessage,
+		map[string]interface{}{"docker_deploy_host_id": hostID},
+		[]string{"Ensure the workspace App Engine appliance."},
+	)
+
+	if host != nil {
+		hostOK := host.Status == DockerDeployHostActive &&
+			host.ApplianceStatus == DockerDeployApplianceHealthy
+		addProofCheck(
+			checks,
+			"docker_deploy_host_ready",
+			hostOK,
+			"Host status="+string(host.Status)+", appliance="+string(host.ApplianceStatus)+".",
+			map[string]interface{}{
+				"status":           host.Status,
+				"appliance_status": host.ApplianceStatus,
+			},
+			[]string{"Check App Engine host health."},
+		)
+	}
+
+	addProofCheck(
+		checks,
+		"docker_deploy_app_row",
+		app != nil,
+		dockerDeployAppRowMessage(app),
+		dockerDeployAppRowDetails(app),
+		[]string{"Publish through App Engine again."},
+	)
+
+	routeOK := app != nil &&
+		app.Status == "running" &&
+		app.ContainerID != "" &&
+		app.RuntimeIP != "" &&
+		app.RuntimePort > 0
+	addProofCheck(
+		checks,
+		"docker_deploy_container_route",
+		routeOK,
+		dockerDeployContainerRouteMessage(app),
+		dockerDeployContainerRouteDetails(app),
+		[]string{"Run App Engine doctor.", "Check appliance container health."},
+	)
+}
+
+func dockerDeployAppRowMessage(app *DockerDeployAppData) string {
+	if app == nil {
+		return "App Engine app row is missing."
+	}
+	return "App Engine app status=" + firstNonEmpty(app.Status, "unknown") + "."
+}
+
+func dockerDeployAppRowDetails(app *DockerDeployAppData) map[string]interface{} {
+	if app == nil {
+		return nil
+	}
+	return map[string]interface{}{
+		"app_id":       app.AppID,
+		"container_id": app.ContainerID,
+		"status":       app.Status,
+	}
+}
+
+func dockerDeployContainerRouteMessage(app *DockerDeployAppData) string {
+	if app == nil {
+		return "Cannot verify container route without App Engine app row."
+	}
+	port := strconv.Itoa(app.RuntimePort)
+	if app.RuntimePort == 0 {
+		port = "missing"
+	}
+	return "Container=" + firstNonEmpty(app.ContainerID, "missing") +
+		", route=" + firstNonEmpty(app.RuntimeIP, "missing") + ":" + port + "."
+}
+
+func dockerDeployContainerRouteDetails(app *DockerDeployAppData) map[string]interface{} {
+	if app == nil {
+		return map[string]interface{}{
+			"container_id": nil,
+			"runtime_ip":   nil,
+			"runtime_port": nil,
+		}
+	}
+	return map[string]interface{}{
+		"container_id": app.ContainerID,
+		"runtime_ip":   app.RuntimeIP,
+		"runtime_port": app.RuntimePort,
+	}
+}
+
+func allProofChecksOK(checks []DeploymentProofCheck) bool {
+	for _, check := range checks {
+		if !check.OK {
+			return false
+		}
+	}
+	return true
+}
+
+func containsString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }

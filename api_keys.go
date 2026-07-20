@@ -1,9 +1,6 @@
 package miosa
 
-import (
-	"context"
-	"fmt"
-)
+import "context"
 
 // ApiKeysService provides list, create, and delete operations for API keys.
 // The plaintext token is returned only at create time; the server stores only a hash.
@@ -79,14 +76,4 @@ func (s *ApiKeysService) Create(ctx context.Context, input CreateApiKeyInput) (*
 // Delete revokes an API key by ID.
 func (s *ApiKeysService) Delete(ctx context.Context, id string) error {
 	return s.client.deleteJSON(ctx, "/api-keys/"+id, nil)
-}
-
-// CreateScoped creates an L2 delegation token bound to one external user.
-// POST /api/v1/api-keys/scoped
-func (s *ApiKeysService) CreateScoped(ctx context.Context, input CreateScopedApiKeyInput) (*ScopedApiKeyResult, error) {
-	var out ScopedApiKeyResult
-	if err := s.client.postJSON(ctx, "/api-keys/scoped", input, &out); err != nil {
-		return nil, fmt.Errorf("ApiKeysService.CreateScoped: %w", err)
-	}
-	return &out, nil
 }

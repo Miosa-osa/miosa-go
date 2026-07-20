@@ -2,7 +2,7 @@
 
 > Official Go SDK for MIOSA — the AI cloud platform for sandboxes, computers, deployments, and managed data.
 
-[![pkg.go.dev](https://pkg.go.dev/badge/github.com/Miosa-osa/miosa-go.svg)](https://pkg.go.dev/github.com/Miosa-osa/miosa-go)
+[![pkg.go.dev](https://pkg.go.dev/badge/github.com/Miosa-osa/miosa-go/v2.svg)](https://pkg.go.dev/github.com/Miosa-osa/miosa-go/v2)
 [![Go version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docs](https://img.shields.io/badge/docs-miosa.ai%2Fdocs-blue)](https://miosa.ai/docs/sdks/go)
@@ -12,7 +12,7 @@ Zero external dependencies (stdlib + gorilla/websocket). Go 1.21+.
 ## Install
 
 ```bash
-go get github.com/Miosa-osa/miosa-go
+go get github.com/Miosa-osa/miosa-go/v2
 ```
 
 ## Quickstart
@@ -27,7 +27,7 @@ import (
     "fmt"
     "log"
 
-    miosa "github.com/Miosa-osa/miosa-go"
+    miosa "github.com/Miosa-osa/miosa-go/v2"
 )
 
 func main() {
@@ -53,7 +53,7 @@ func main() {
 
     // Expose a preview URL
     fmt.Println(sbx.PreviewURL(8000, "/"))
-    // => https://8000-<slug>.sandbox.miosa.ai/
+    // => https://8000-<slug>.sandbox.<tenant-domain>/
 
     _ = sbx.Destroy(ctx)
 }
@@ -62,7 +62,7 @@ func main() {
 ## Agent device routing
 
 Use `client.Devices` before launching an orchestration workflow. It helps route
-work across sandbox workers, Computers, local devices, and Docker Deploy hosts
+work across sandbox workers, Computers, local devices, and App Engine hosts
 without hiding the lower-level APIs.
 
 ```go
@@ -85,6 +85,37 @@ desktop, err := client.Computers.Create(ctx, miosa.CreateComputerInput{
     Name: "browser-agent",
 })
 _ = desktop
+```
+
+## Choosing compute products
+
+Use the compute catalog before creating user-facing resources. It is the source
+of truth for canonical product lanes (`sandbox`, `computer`,
+`docker_deploy_host`), templates (`nextjs`, `miosa-desktop`,
+`miosa-docker-deploy-runtime`), supported sizes, and whether each
+template/size is `fast_ready`, `cold_boot_only`, or `missing`.
+
+```go
+catalog, err := client.Regions.Catalog(ctx)
+if err != nil {
+    log.Fatal(err)
+}
+
+for _, product := range catalog.Data.Products {
+    if product.ProductID != "sandbox" {
+        continue
+    }
+    for _, tmpl := range product.Templates {
+        if tmpl.TemplateID != "nextjs" {
+            continue
+        }
+        for _, readiness := range tmpl.ArtifactReadiness {
+            if readiness.Size == "medium" && readiness.State != miosa.ArtifactReadinessFastReady {
+                log.Fatal("nextjs medium is not fast-ready in this region")
+            }
+        }
+    }
+}
 ```
 
 ## Computer lifecycle
@@ -221,7 +252,7 @@ client := miosa.NewClient("msk_live_...",
 
 ## Links
 
-- [pkg.go.dev reference](https://pkg.go.dev/github.com/Miosa-osa/miosa-go)
+- [pkg.go.dev reference](https://pkg.go.dev/github.com/Miosa-osa/miosa-go/v2)
 - [Full documentation](https://miosa.ai/docs/sdks/go)
 - [Quickstart](https://miosa.ai/docs/quickstart)
 - [GitHub](https://github.com/Miosa-osa/miosa-go)

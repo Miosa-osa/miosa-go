@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 // ─── EgressSecrets ───────────────────────────────────────────────────────────

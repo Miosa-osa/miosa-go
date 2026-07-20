@@ -72,20 +72,64 @@ func (s *TenantService) DeleteBranding(ctx context.Context) error {
 
 // ─── Sandbox fork ─────────────────────────────────────────────────────────────
 
-// ForkSandboxInput is the request body for SandboxesService.Fork.
+// ForkSandboxInput is the legacy request body for SandboxesService.Fork.
 type ForkSandboxInput struct {
 	SnapshotID     string `json:"snapshot_id,omitempty"`
 	Name           string `json:"name,omitempty"`
 	ExternalUserID string `json:"external_user_id,omitempty"`
+	TimeoutSec     int    `json:"timeout_sec,omitempty"`
+	TemplateID     string `json:"template_id,omitempty"`
+	IdempotencyKey string `json:"-"`
 }
 
-// Fork creates a new sandbox by forking an existing one.
+// PublicForkSandboxInput contains only fields allowed by the public V1 contract.
+type PublicForkSandboxInput struct {
+	TimeoutSec int    `json:"timeout_sec,omitempty"`
+	TemplateID string `json:"template_id,omitempty"`
+	// IdempotencyKey is sent as the Idempotency-Key header.
+	IdempotencyKey string `json:"-"`
+}
+
+func forkIdempotencyKey(provided string) (string, error) {
+	key := idemKey(provided)
+	if key == "" {
+		return "", fmt.Errorf("generate fork idempotency key")
+	}
+	return key, nil
+}
+
+// Fork creates a new sandbox using the legacy private request shape.
+// Deprecated: use ForkSandbox for the public V1 contract.
 func (s *SandboxesService) Fork(ctx context.Context, sandboxID string, input ForkSandboxInput) (*Computer, error) {
+	idempotencyKey, err := forkIdempotencyKey(input.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
 	var out Computer
-	if err := s.client.postJSON(ctx, fmt.Sprintf("/sandboxes/%s/fork", sandboxID), input, &out); err != nil {
+	if err := s.client.postJSONIdempotent(ctx, fmt.Sprintf("/sandboxes/%s/fork", sandboxID), input, &out, idempotencyKey); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ForkSandbox creates a native sandbox from a copy-on-write snapshot.
+// Fork remains available for compatibility with callers expecting Computer.
+func (s *SandboxesService) ForkSandbox(ctx context.Context, sandboxID string, input PublicForkSandboxInput) (*Sandbox, error) {
+	idempotencyKey, err := forkIdempotencyKey(input.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	var out sandboxResponse
+	if err := s.client.postJSONIdempotent(ctx, fmt.Sprintf("/sandboxes/%s/fork", sandboxID), input, &out, idempotencyKey); err != nil {
+		return nil, err
+	}
+	return &out.Data, nil
+}
+
+// ForkLegacy calls the private fork shape retained for older integrations.
+// New integrations should use ForkSandbox, whose body is public-contract safe.
+func (s *SandboxesService) ForkLegacy(ctx context.Context, sandboxID string, input ForkSandboxInput) (*Computer, error) {
+	return s.Fork(ctx, sandboxID, input)
 }
 
 // ─── Sandbox files ────────────────────────────────────────────────────────────

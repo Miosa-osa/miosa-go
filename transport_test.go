@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 // TestNewClientReusesHTTPClient verifies that two service references on the

@@ -70,7 +70,7 @@ type DeviceListResponse struct {
 }
 
 // DevicesService provides a product-level facade over Sandboxes, Computers,
-// local devices, and Docker Deploy hosts.
+// local devices, and App Engine hosts.
 type DevicesService struct {
 	client *Client
 }
@@ -257,7 +257,7 @@ var deviceCatalog = []DeviceCatalogEntry{
 	},
 	{
 		Kind:        DeviceKindDockerDeployHost,
-		Label:       "Docker Deploy Host",
+		Label:       "App Engine Host",
 		Purpose:     "Workspace appliance VM that runs Docker containers for durable apps published from sandboxes.",
 		Lifecycle:   "Always-on deployment capacity; not an interactive coding workspace.",
 		Persistence: "Versioned releases and routing are durable; edits happen in sandboxes before publish.",

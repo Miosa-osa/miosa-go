@@ -6,9 +6,13 @@ package miosa
 type ComputerSize string
 
 const (
+	SizeXS     ComputerSize = "xs"
 	SizeSmall  ComputerSize = "small"
 	SizeMedium ComputerSize = "medium"
 	SizeLarge  ComputerSize = "large"
+	SizeXL     ComputerSize = "xl"
+	// SizeXLarge is retained as a source-compatible alias for SizeXL.
+	SizeXLarge ComputerSize = SizeXL
 )
 
 // ComputerStatus is the lifecycle state of a computer.
@@ -48,6 +52,9 @@ type CreateComputerInput struct {
 	TemplateType string            `json:"template_type,omitempty"`
 	Size         ComputerSize      `json:"size,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
+	// AllowProvision opts in to the in-sandbox L3 token carrying the
+	// "provision" scope. Defaults to false on the server when nil.
+	AllowProvision *bool `json:"allow_provision,omitempty"`
 	// White-label attribution. Phase 2A — stored as text on the row.
 	ExternalWorkspaceID string `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string `json:"external_user_id,omitempty"`
@@ -213,7 +220,7 @@ type FileExportResult struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// ─── Agent / CUA ─────────────────────────────────────────────────────────────
+// Agent and desktop control session types.
 
 // AgentSessionStatus is the lifecycle state of an agent session.
 type AgentSessionStatus string
@@ -244,7 +251,7 @@ const (
 	EventError            AgentEventType = "error"
 )
 
-// RunAgentInput is the request body for POST /computers/{id}/cua/sessions.
+// RunAgentInput is the request body for POST /computers/{id}/control/sessions.
 type RunAgentInput struct {
 	Goal     string `json:"goal"`
 	ModelID  string `json:"model_id,omitempty"`
@@ -932,7 +939,7 @@ const (
 	DeploymentSourceUpload  DeploymentSourceType = "upload"
 )
 
-// DeploymentProduct identifies the runtime product serving a deployment.
+// DeploymentProduct identifies which MIOSA runtime serves a deployment.
 type DeploymentProduct string
 
 const (
@@ -969,6 +976,23 @@ const (
 	RuntimeInstanceFailed    RuntimeInstanceState = "failed"
 )
 
+// DockerDeployAppData is the truth row for a deployment running inside
+// the workspace App Engine appliance.
+type DockerDeployAppData struct {
+	ID                 string                 `json:"id,omitempty"`
+	DeploymentID       string                 `json:"deployment_id,omitempty"`
+	DockerDeployHostID string                 `json:"docker_deploy_host_id,omitempty"`
+	AppID              string                 `json:"app_id,omitempty"`
+	ContainerID        string                 `json:"container_id,omitempty"`
+	RuntimeIP          string                 `json:"runtime_ip,omitempty"`
+	RuntimePort        int                    `json:"runtime_port,omitempty"`
+	Status             string                 `json:"status,omitempty"`
+	PublicURL          string                 `json:"public_url,omitempty"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt          string                 `json:"created_at,omitempty"`
+	UpdatedAt          string                 `json:"updated_at,omitempty"`
+}
+
 // DeploymentData — Stable production object for a published app/site/API.
 type DeploymentData struct {
 	ID       string `json:"id"`
@@ -992,6 +1016,7 @@ type DeploymentData struct {
 	LinkedDatabaseID    string                 `json:"linked_database_id,omitempty"`
 	DeploymentProduct   DeploymentProduct      `json:"deployment_product,omitempty"`
 	DockerDeployHostID  string                 `json:"docker_deploy_host_id,omitempty"`
+	DockerDeployApp     *DockerDeployAppData   `json:"docker_deploy_app,omitempty"`
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string                 `json:"external_user_id,omitempty"`
@@ -1030,7 +1055,7 @@ type DeploymentVersionData struct {
 	UpdatedAt           string                 `json:"updated_at,omitempty"`
 }
 
-// DeploymentReleaseData — Immutable build artifact (static tarball, OCI, rootfs).
+// DeploymentReleaseData is an immutable build artifact (static tarball, OCI, rootfs).
 type DeploymentReleaseData struct {
 	ID                  string                 `json:"id"`
 	DeploymentVersionID string                 `json:"deployment_version_id"`

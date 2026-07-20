@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 func TestCustomDomainsRegister(t *testing.T) {
@@ -21,8 +21,8 @@ func TestCustomDomainsRegister(t *testing.T) {
 				ComputerID:         "cmp_d",
 				FQDN:               "app.example.com",
 				Status:             miosa.DomainPending,
-				VerificationTarget: "cmp_d.sandbox.miosa.ai",
-				Instructions:       "Add CNAME app.example.com → cmp_d.sandbox.miosa.ai",
+				VerificationTarget: "cmp_d.sandbox.miosa.app",
+				Instructions:       "Add CNAME app.example.com → cmp_d.sandbox.miosa.app",
 			},
 		})
 	})

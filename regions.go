@@ -54,6 +54,68 @@ type TemplateListResponse struct {
 	Data []ComputeTemplate `json:"data"`
 }
 
+// ArtifactReadinessState describes whether a template/size can fast boot.
+type ArtifactReadinessState string
+
+const (
+	ArtifactReadinessFastReady    ArtifactReadinessState = "fast_ready"
+	ArtifactReadinessColdBootOnly ArtifactReadinessState = "cold_boot_only"
+	ArtifactReadinessMissing      ArtifactReadinessState = "missing"
+)
+
+// ComputeArtifactReadiness is the readiness of one template at one size.
+type ComputeArtifactReadiness struct {
+	Size          string                 `json:"size"`
+	State         ArtifactReadinessState `json:"state"`
+	CheckedNodes  int                    `json:"checked_nodes"`
+	ReadyNodes    int                    `json:"ready_nodes"`
+	ColdBootNodes int                    `json:"cold_boot_nodes"`
+	MissingNodes  int                    `json:"missing_nodes"`
+	CheckedHosts  int                    `json:"checked_hosts"`
+	ReadyHosts    int                    `json:"ready_hosts"`
+	ColdBootHosts int                    `json:"cold_boot_hosts"`
+	MissingHosts  int                    `json:"missing_hosts"`
+	Notes         []string               `json:"notes,omitempty"`
+}
+
+// ComputeCatalogTemplate describes a concrete runnable template/profile.
+type ComputeCatalogTemplate struct {
+	ID                string                     `json:"id"`
+	TemplateID        string                     `json:"template_id,omitempty"`
+	Name              string                     `json:"name"`
+	Description       string                     `json:"description"`
+	DefaultSize       string                     `json:"default_size"`
+	SizeIDs           []string                   `json:"size_ids"`
+	SupportedSizes    []string                   `json:"supported_sizes,omitempty"`
+	ArtifactReadiness []ComputeArtifactReadiness `json:"artifact_readiness"`
+}
+
+// ComputeCatalogProduct describes a canonical compute product lane.
+type ComputeCatalogProduct struct {
+	ID                string                   `json:"id"`
+	ProductID         string                   `json:"product_id,omitempty"`
+	Name              string                   `json:"name"`
+	Description       string                   `json:"description"`
+	DefaultTemplate   string                   `json:"default_template"`
+	DefaultTemplateID string                   `json:"default_template_id,omitempty"`
+	DefaultSize       string                   `json:"default_size"`
+	SizeIDs           []string                 `json:"size_ids"`
+	Templates         []ComputeCatalogTemplate `json:"templates"`
+}
+
+// ComputeCatalog is the canonical catalog of products, templates, sizes, and
+// fast-readiness truth for choosing a launch-safe configuration.
+type ComputeCatalog struct {
+	Products    []ComputeCatalogProduct `json:"products"`
+	Sizes       []SizeData              `json:"sizes"`
+	GeneratedAt string                  `json:"generated_at"`
+}
+
+// ComputeCatalogResponse wraps GET /compute/catalog.
+type ComputeCatalogResponse struct {
+	Data ComputeCatalog `json:"data"`
+}
+
 // ─── Methods ──────────────────────────────────────────────────────────────────
 
 // ListRegions lists available datacenter regions.
@@ -81,6 +143,15 @@ func (s *RegionsService) Pricing(ctx context.Context) (map[string]interface{}, e
 		return nil, err
 	}
 	return out, nil
+}
+
+// Catalog returns canonical products, templates, sizes, and artifact readiness.
+func (s *RegionsService) Catalog(ctx context.Context) (*ComputeCatalogResponse, error) {
+	var out ComputeCatalogResponse
+	if err := s.client.getJSON(ctx, "/compute/catalog", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 // ListTemplates lists community computer templates.

@@ -11,7 +11,7 @@ type DockerDeployService struct {
 	client *Client
 }
 
-// DockerDeployHostStatus is the lifecycle of a workspace Docker Deploy host.
+// DockerDeployHostStatus is the lifecycle of a workspace App Engine host.
 type DockerDeployHostStatus string
 
 const (
@@ -37,7 +37,7 @@ const (
 	DockerDeployApplianceUnknown      DockerDeployApplianceStatus = "unknown"
 )
 
-// DockerDeployHostData is a dedicated workspace host running the Docker Deploy appliance.
+// DockerDeployHostData is a dedicated workspace host running the App Engine appliance.
 type DockerDeployHostData struct {
 	ID                  string                      `json:"id"`
 	TenantID            string                      `json:"tenant_id"`
@@ -60,7 +60,7 @@ type DockerDeployHostData struct {
 	UpdatedAt           string                      `json:"updated_at,omitempty"`
 }
 
-// DockerDeployTemplate is a starter template for Docker Deploy apps.
+// DockerDeployTemplate is a starter template for App Engine apps.
 type DockerDeployTemplate struct {
 	ID          string                 `json:"id"`
 	Name        string                 `json:"name"`
@@ -72,12 +72,12 @@ type DockerDeployTemplate struct {
 	Extra       map[string]interface{} `json:"-"`
 }
 
-// ListDockerDeployHostsInput filters Docker Deploy hosts.
+// ListDockerDeployHostsInput filters App Engine hosts.
 type ListDockerDeployHostsInput struct {
 	WorkspaceID string
 }
 
-// EnsureDockerDeployHostInput ensures a workspace has a Docker Deploy host.
+// EnsureDockerDeployHostInput ensures a workspace has a App Engine host.
 type EnsureDockerDeployHostInput struct {
 	WorkspaceID         string `json:"workspace_id,omitempty"`
 	ExternalWorkspaceID string `json:"external_workspace_id,omitempty"`
@@ -110,7 +110,7 @@ type dockerDeployTemplateResponse struct {
 	Template *DockerDeployTemplate `json:"template"`
 }
 
-// ListHosts lists Docker Deploy appliance hosts for the current tenant.
+// ListHosts lists App Engine appliance hosts for the current tenant.
 func (s *DockerDeployService) ListHosts(ctx context.Context, input ListDockerDeployHostsInput) ([]DockerDeployHostData, error) {
 	params := map[string]string{}
 	if input.WorkspaceID != "" {
@@ -126,7 +126,7 @@ func (s *DockerDeployService) ListHosts(ctx context.Context, input ListDockerDep
 	return out.Hosts, nil
 }
 
-// EnsureHost creates or returns the workspace's dedicated Docker Deploy host.
+// EnsureHost creates or returns the workspace's dedicated App Engine host.
 func (s *DockerDeployService) EnsureHost(ctx context.Context, input EnsureDockerDeployHostInput) (*EnsureDockerDeployHostResult, error) {
 	var out dockerDeployHostResponse
 	if err := s.client.postJSON(ctx, "/docker-deploy/hosts/ensure", input, &out); err != nil {
@@ -139,7 +139,7 @@ func (s *DockerDeployService) EnsureHost(ctx context.Context, input EnsureDocker
 	return &EnsureDockerDeployHostResult{Host: *host, Queued: out.Queued}, nil
 }
 
-// GetHost fetches one Docker Deploy host by ID.
+// GetHost fetches one App Engine host by ID.
 func (s *DockerDeployService) GetHost(ctx context.Context, hostID string) (*DockerDeployHostData, error) {
 	var out dockerDeployHostResponse
 	if err := s.client.getJSON(ctx, "/docker-deploy/hosts/"+hostID, &out); err != nil {
@@ -152,7 +152,7 @@ func (s *DockerDeployService) GetHost(ctx context.Context, hostID string) (*Dock
 	return host, nil
 }
 
-// ListTemplates lists Docker Deploy starter templates.
+// ListTemplates lists App Engine starter templates.
 func (s *DockerDeployService) ListTemplates(ctx context.Context) ([]DockerDeployTemplate, error) {
 	var out dockerDeployTemplateListResponse
 	if err := s.client.getJSON(ctx, "/docker-deploy/templates", &out); err != nil {
@@ -164,7 +164,7 @@ func (s *DockerDeployService) ListTemplates(ctx context.Context) ([]DockerDeploy
 	return out.Templates, nil
 }
 
-// GetTemplate fetches one Docker Deploy starter template by ID.
+// GetTemplate fetches one App Engine starter template by ID.
 func (s *DockerDeployService) GetTemplate(ctx context.Context, templateID string) (*DockerDeployTemplate, error) {
 	var out dockerDeployTemplateResponse
 	if err := s.client.getJSON(ctx, "/docker-deploy/templates/"+url.PathEscape(templateID), &out); err != nil {

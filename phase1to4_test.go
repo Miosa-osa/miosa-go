@@ -2,10 +2,12 @@ package miosa_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"reflect"
 	"testing"
 
-	miosa "github.com/Miosa-osa/miosa-go"
+	miosa "github.com/Miosa-osa/miosa-go/v2"
 )
 
 func TestTenantPreviewDomain(t *testing.T) {
@@ -74,18 +76,46 @@ func TestTenantBranding(t *testing.T) {
 }
 
 func TestSandboxFork(t *testing.T) {
+	requests := 0
 	mux := http.NewServeMux()
 	mux.HandleFunc("/sandboxes/sbx-1/fork", func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if got := r.Header.Get("Idempotency-Key"); got == "" {
+			t.Fatal("fork request is missing Idempotency-Key")
+		} else if requests == 1 && got != "fork-idem-1" {
+			t.Fatalf("Idempotency-Key = %q, want fork-idem-1", got)
+		}
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]interface{}{"timeout_sec": float64(1200), "template_id": "node-22"}
+		if requests == 1 {
+			want["name"] = "legacy-name"
+			want["snapshot_id"] = "snap-1"
+			want["external_user_id"] = "user-1"
+		}
+		if !reflect.DeepEqual(body, want) {
+			t.Fatalf("fork body = %#v, want %#v", body, want)
+		}
 		writeJSON(w, 200, map[string]string{"id": "sbx-2", "template_type": "miosa-sandbox"})
 	})
 
 	c := newTestClient(t, mux)
-	got, err := c.Sandboxes.Fork(context.Background(), "sbx-1", miosa.ForkSandboxInput{Name: "fork-of-1"})
+	got, err := c.Sandboxes.Fork(context.Background(), "sbx-1", miosa.ForkSandboxInput{
+		TimeoutSec: 1200, TemplateID: "node-22", IdempotencyKey: "fork-idem-1",
+		Name: "legacy-name", SnapshotID: "snap-1", ExternalUserID: "user-1",
+	})
 	if err != nil {
 		t.Fatalf("Fork: %v", err)
 	}
 	if got.ID != "sbx-2" {
 		t.Fatalf("expected id sbx-2, got %s", got.ID)
+	}
+	if got, err := c.Sandboxes.ForkSandbox(context.Background(), "sbx-1", miosa.PublicForkSandboxInput{
+		TimeoutSec: 1200, TemplateID: "node-22",
+	}); err != nil || got.ID != "sbx-2" {
+		t.Fatalf("ForkSandbox with generated idempotency key = %#v, %v", got, err)
 	}
 }
 

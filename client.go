@@ -21,7 +21,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "1.2.5"
+	sdkVersion        = "2.0.0"
 )
 
 // ClientOption is a functional option for configuring a Client.
@@ -56,12 +56,12 @@ type Client struct {
 	httpClient *http.Client
 	maxRetries int
 
-	// Services — populated by NewClient.
+	// Services - populated by NewClient.
 	Computers           *ComputersService
-	AgentRuns           *AgentRunsService
 	Sandboxes           *SandboxesService
 	Devices             *DevicesService
 	Deployments         *DeploymentsService
+	DockerDeploy        *DockerDeployService
 	Files               *FilesService
 	Credits             *CreditsService
 	Admin               *AdminService
@@ -75,10 +75,9 @@ type Client struct {
 	CronJobs            *CronJobsService
 	HealthChecks        *HealthChecksService
 	Webhooks            *WebhooksService
+	Templates           *TemplatesService
 	SandboxTemplates    *SandboxTemplatesService
 	ApiKeys             *ApiKeysService
-	Tokens              *TokensService
-	DockerDeploy        *DockerDeployService
 	Tenant              *TenantService
 	Regions             *RegionsService
 	Settings            *SettingsService
@@ -92,6 +91,7 @@ type Client struct {
 	ProjectAuth         *ProjectAuthService
 	ExternalKeys        *ExternalKeysService
 	Mcp                 *McpService
+	Runs                *RunsService
 	// P3/P4 services — intelligence gateway, admin, and catalog surfaces.
 	Models              *ModelsService
 	Completions         *CompletionsService
@@ -113,12 +113,6 @@ type Client struct {
 	Audit   *EgressAuditService
 	// Phase 1-4 additions.
 	Quotas *QuotasService
-	// Phase 6 governance.
-	GovernanceTenant     *GovernanceTenantService
-	GovernanceWorkspaces *GovernanceWorkspacesService
-	ExternalUsers        *ExternalUsersGovernanceService
-	Bulk                 *BulkService
-	Billing              *BillingService
 }
 
 // newDefaultTransport builds an *http.Transport tuned for SDK use:
@@ -172,7 +166,6 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		o(c)
 	}
 	c.Computers = &ComputersService{client: c}
-	c.AgentRuns = &AgentRunsService{client: c}
 	c.Sandboxes = &SandboxesService{client: c}
 	c.Devices = &DevicesService{client: c}
 	c.Deployments = &DeploymentsService{client: c}
@@ -189,9 +182,9 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.CronJobs = &CronJobsService{client: c}
 	c.HealthChecks = &HealthChecksService{client: c}
 	c.Webhooks = &WebhooksService{client: c}
+	c.Templates = &TemplatesService{client: c}
 	c.SandboxTemplates = &SandboxTemplatesService{client: c}
 	c.ApiKeys = &ApiKeysService{client: c}
-	c.Tokens = &TokensService{client: c}
 	c.DockerDeploy = &DockerDeployService{client: c}
 	c.Tenant = &TenantService{client: c}
 	c.Regions = &RegionsService{client: c}
@@ -206,6 +199,7 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.ProjectAuth = &ProjectAuthService{client: c}
 	c.ExternalKeys = &ExternalKeysService{client: c}
 	c.Mcp = &McpService{client: c}
+	c.Runs = &RunsService{client: c}
 	// P3/P4 services.
 	c.Models = &ModelsService{client: c}
 	c.Completions = &CompletionsService{client: c}
@@ -224,25 +218,6 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.Network = &EgressNetworkService{client: c}
 	c.Audit = &EgressAuditService{client: c}
 	c.Quotas = &QuotasService{client: c}
-	// Phase 6 governance
-	tenantPolicy := &TenantPolicyService{client: c}
-	tenantMembers := &TenantMembersService{client: c}
-	tenantEvents := &TenantEventStreamService{client: c}
-	c.GovernanceTenant = &GovernanceTenantService{
-		client:  c,
-		Policy:  tenantPolicy,
-		Members: tenantMembers,
-		Events:  tenantEvents,
-	}
-	c.GovernanceWorkspaces = &GovernanceWorkspacesService{client: c}
-	c.ExternalUsers = &ExternalUsersGovernanceService{client: c}
-	c.Bulk = &BulkService{
-		Sandboxes: &BulkSandboxesService{client: c},
-		Policy:    &BulkPolicyService{client: c},
-		Jobs:      &BulkJobsService{client: c},
-	}
-	billingInvoices := &BillingInvoicesService{client: c}
-	c.Billing = &BillingService{client: c, Invoices: billingInvoices}
 	return c
 }
 

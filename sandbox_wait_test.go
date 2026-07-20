@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 // streamingSSE writes an SSE response with the given event lines and flushes

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 var wsUpgrader = websocket.Upgrader{

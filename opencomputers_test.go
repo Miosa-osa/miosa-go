@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	miosa "github.com/Miosa-osa/miosa-go"
+	miosa "github.com/Miosa-osa/miosa-go/v2"
 )
 
 // newTestClientOC builds a test server from mux and returns a client pointed at it.

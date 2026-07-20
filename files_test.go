@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 func TestFilesList(t *testing.T) {

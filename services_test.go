@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Miosa-osa/miosa-go"
+	"github.com/Miosa-osa/miosa-go/v2"
 )
 
 func TestServicesCreate(t *testing.T) {
