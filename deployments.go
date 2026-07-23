@@ -347,10 +347,65 @@ func (s *DeploymentsService) Versions(deploymentID string) *DeploymentVersionsSe
 	return &DeploymentVersionsService{client: s.client, deploymentID: deploymentID}
 }
 
+// Releases returns immutable release operations scoped to one deployment.
+func (s *DeploymentsService) Releases(deploymentID string) *DeploymentReleasesService {
+	return &DeploymentReleasesService{client: s.client, deploymentID: deploymentID}
+}
+
+// DeploymentReleasesService is scoped to one deployment.
+type DeploymentReleasesService struct {
+	client       *Client
+	deploymentID string
+}
+
+// Get fetches one immutable release.
+func (s *DeploymentReleasesService) Get(ctx context.Context, releaseID string) (*DeploymentReleaseData, error) {
+	var env apiResponse[DeploymentReleaseData]
+	if err := s.client.getJSON(ctx, "/deployments/"+s.deploymentID+"/releases/"+releaseID, &env); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
+}
+
+// Promote activates one exact immutable release through its configured runtime product.
+func (s *DeploymentReleasesService) Promote(ctx context.Context, releaseID, idempotencyKey string) (*DeploymentData, error) {
+	if idempotencyKey == "" {
+		idempotencyKey = "promote:" + s.deploymentID + ":" + releaseID
+	}
+	var env apiResponse[DeploymentData]
+	if err := s.client.postJSONIdempotent(
+		ctx,
+		"/deployments/"+s.deploymentID+"/releases/"+releaseID+"/promote",
+		map[string]interface{}{},
+		&env,
+		idemKey(idempotencyKey),
+	); err != nil {
+		return nil, err
+	}
+	return &env.Data, nil
+}
+
 // DeploymentVersionsService is scoped to one deployment.
 type DeploymentVersionsService struct {
 	client       *Client
 	deploymentID string
+}
+
+// MigrationBackupData describes the backup queued for a migration-aware promotion.
+type MigrationBackupData struct {
+	ID          string `json:"id"`
+	DatabaseID  string `json:"database_id"`
+	State       string `json:"state"`
+	BackupType  string `json:"backup_type,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	StartedAt   string `json:"started_at,omitempty"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+}
+
+type PrepareMigrationBackupResponse struct {
+	Backup  MigrationBackupData   `json:"backup"`
+	Version DeploymentVersionData `json:"version"`
 }
 
 // List returns versions for a deployment.
@@ -395,6 +450,15 @@ func (s *DeploymentVersionsService) Promote(ctx context.Context, versionID strin
 		return nil, err
 	}
 	return &env.Data, nil
+}
+
+// PrepareMigrationBackup queues the backup required before promoting a risky version.
+func (s *DeploymentVersionsService) PrepareMigrationBackup(ctx context.Context, versionID string) (*PrepareMigrationBackupResponse, error) {
+	var out apiResponse[PrepareMigrationBackupResponse]
+	if err := s.client.postJSON(ctx, "/deployments/"+s.deploymentID+"/versions/"+versionID+"/migration-backup", map[string]interface{}{}, &out); err != nil {
+		return nil, err
+	}
+	return &out.Data, nil
 }
 
 // ─── Domains sub-resource ────────────────────────────────────────────────

@@ -21,7 +21,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "2.0.0"
+	sdkVersion        = "2.0.1"
 )
 
 // ClientOption is a functional option for configuring a Client.
