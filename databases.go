@@ -14,16 +14,17 @@ type DatabasesService struct {
 
 // DatabaseData is the API representation of a managed database.
 type DatabaseData struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	TenantID  string `json:"tenant_id"`
-	Engine    string `json:"engine"`
-	Version   string `json:"version"`
-	Status    string `json:"status"`
-	Host      string `json:"host,omitempty"`
-	Port      int    `json:"port,omitempty"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	TenantID      string `json:"tenant_id"`
+	EnvironmentID string `json:"environment_id,omitempty"`
+	Engine        string `json:"engine"`
+	Version       string `json:"version"`
+	Status        string `json:"status"`
+	Host          string `json:"host,omitempty"`
+	Port          int    `json:"port,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
 // DatabaseListResponse wraps GET /databases.
@@ -38,6 +39,9 @@ type CreateDatabaseInput struct {
 	Version        string `json:"version,omitempty"`
 	SizeGB         int    `json:"size_gb,omitempty"`
 	IdempotencyKey string `json:"-"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+	ProjectID      string `json:"project_id,omitempty"`
+	EnvironmentID  string `json:"environment_id,omitempty"`
 }
 
 // ListDatabasesInput holds optional query parameters for GET /databases.

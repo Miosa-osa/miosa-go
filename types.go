@@ -1001,29 +1001,31 @@ type DeploymentData struct {
 	Name     string `json:"name"`
 	Slug     string `json:"slug"`
 	// Deprecated: repo-based model. New deployments use SourceType="sandbox".
-	RepoURL             string                 `json:"repo_url,omitempty"`
-	RepoProvider        string                 `json:"repo_provider,omitempty"`
-	Branch              string                 `json:"branch,omitempty"`
-	BuildCommand        string                 `json:"build_command,omitempty"`
-	RunCommand          string                 `json:"run_command,omitempty"`
-	RuntimeImage        string                 `json:"runtime_image,omitempty"`
-	CurrentBuildID      string                 `json:"current_build_id,omitempty"`
-	ActiveVersionID     string                 `json:"active_version_id,omitempty"`
-	SourceType          DeploymentSourceType   `json:"source_type,omitempty"`
-	State               DeploymentState        `json:"state"`
-	AutoDeploy          bool                   `json:"auto_deploy,omitempty"`
-	CustomDomainID      string                 `json:"custom_domain_id,omitempty"`
-	LinkedDatabaseID    string                 `json:"linked_database_id,omitempty"`
-	DeploymentProduct   DeploymentProduct      `json:"deployment_product,omitempty"`
-	DockerDeployHostID  string                 `json:"docker_deploy_host_id,omitempty"`
-	DockerDeployApp     *DockerDeployAppData   `json:"docker_deploy_app,omitempty"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
-	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
-	ExternalUserID      string                 `json:"external_user_id,omitempty"`
-	ExternalProjectID   string                 `json:"external_project_id,omitempty"`
-	PublicURL           string                 `json:"public_url,omitempty"`
-	CreatedAt           string                 `json:"created_at,omitempty"`
-	UpdatedAt           string                 `json:"updated_at,omitempty"`
+	RepoURL               string                 `json:"repo_url,omitempty"`
+	RepoProvider          string                 `json:"repo_provider,omitempty"`
+	Branch                string                 `json:"branch,omitempty"`
+	BuildCommand          string                 `json:"build_command,omitempty"`
+	RunCommand            string                 `json:"run_command,omitempty"`
+	RuntimeImage          string                 `json:"runtime_image,omitempty"`
+	CurrentBuildID        string                 `json:"current_build_id,omitempty"`
+	ActiveVersionID       string                 `json:"active_version_id,omitempty"`
+	ActiveReleaseID       string                 `json:"active_release_id,omitempty"`
+	RunningArtifactSHA256 string                 `json:"running_artifact_sha256,omitempty"`
+	SourceType            DeploymentSourceType   `json:"source_type,omitempty"`
+	State                 DeploymentState        `json:"state"`
+	AutoDeploy            bool                   `json:"auto_deploy,omitempty"`
+	CustomDomainID        string                 `json:"custom_domain_id,omitempty"`
+	LinkedDatabaseID      string                 `json:"linked_database_id,omitempty"`
+	DeploymentProduct     DeploymentProduct      `json:"deployment_product,omitempty"`
+	DockerDeployHostID    string                 `json:"docker_deploy_host_id,omitempty"`
+	DockerDeployApp       *DockerDeployAppData   `json:"docker_deploy_app,omitempty"`
+	Metadata              map[string]interface{} `json:"metadata,omitempty"`
+	ExternalWorkspaceID   string                 `json:"external_workspace_id,omitempty"`
+	ExternalUserID        string                 `json:"external_user_id,omitempty"`
+	ExternalProjectID     string                 `json:"external_project_id,omitempty"`
+	PublicURL             string                 `json:"public_url,omitempty"`
+	CreatedAt             string                 `json:"created_at,omitempty"`
+	UpdatedAt             string                 `json:"updated_at,omitempty"`
 }
 
 // DeploymentVersionData — Immutable history record of one publish.
