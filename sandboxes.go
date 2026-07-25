@@ -42,6 +42,13 @@ type CreateSandboxInput struct {
 	// AllowProvision opts in to the in-sandbox L3 token carrying the
 	// "provision" scope. Defaults to false on the server when nil.
 	AllowProvision *bool `json:"allow_provision,omitempty"`
+	// Canonical MIOSA ownership. Slugs and names are resolved by the control plane.
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	ProjectID     string `json:"project_id,omitempty"`
+	ProjectSlug   string `json:"project_slug,omitempty"`
+	ProjectName   string `json:"project_name,omitempty"`
 	// White-label attribution. Stored as text on the sandbox row by Phase 2A.
 	ExternalWorkspaceID string `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string `json:"external_user_id,omitempty"`
@@ -135,6 +142,12 @@ type createSandboxRequest struct {
 	Persistent          *bool             `json:"persistent,omitempty"`
 	AlwaysOn            bool              `json:"always_on,omitempty"`
 	Region              string            `json:"region,omitempty"`
+	WorkspaceID         string            `json:"workspace_id,omitempty"`
+	WorkspaceSlug       string            `json:"workspace_slug,omitempty"`
+	WorkspaceName       string            `json:"workspace_name,omitempty"`
+	ProjectID           string            `json:"project_id,omitempty"`
+	ProjectSlug         string            `json:"project_slug,omitempty"`
+	ProjectName         string            `json:"project_name,omitempty"`
 	ExternalWorkspaceID string            `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string            `json:"external_user_id,omitempty"`
 	ExternalProjectID   string            `json:"external_project_id,omitempty"`
@@ -150,17 +163,19 @@ type ListSandboxesInput struct {
 
 // SandboxUsage contains measured and provisioned usage for one sandbox.
 type SandboxUsage struct {
-	SandboxID           string            `json:"sandbox_id"`
-	State               string            `json:"state"`
-	RuntimeSec          int               `json:"runtime_sec"`
-	ProvisionedVCPUMS   int64             `json:"provisioned_vcpu_ms"`
-	ActiveCPUMS         *int64            `json:"active_cpu_ms"`
-	NetworkIngressBytes *int64            `json:"network_ingress_bytes"`
-	NetworkEgressBytes  *int64            `json:"network_egress_bytes"`
-	MeasurementStatus   map[string]string `json:"measurement_status"`
-	EstimatedCostCents  int               `json:"estimated_cost_cents"`
-	TimeoutSec          int               `json:"timeout_sec"`
-	TimeoutRemainingMS  *int64            `json:"timeout_remaining_ms"`
+	SandboxID             string            `json:"sandbox_id"`
+	State                 string            `json:"state"`
+	RuntimeSec            int               `json:"runtime_sec"`
+	ProvisionedVCPUMS     int64             `json:"provisioned_vcpu_ms"`
+	ProvisionedMemoryMBMS *int64            `json:"provisioned_memory_mb_ms"`
+	CreationCount         int               `json:"creation_count"`
+	ActiveCPUMS           *int64            `json:"active_cpu_ms"`
+	NetworkIngressBytes   *int64            `json:"network_ingress_bytes"`
+	NetworkEgressBytes    *int64            `json:"network_egress_bytes"`
+	MeasurementStatus     map[string]string `json:"measurement_status"`
+	EstimatedCostCents    int               `json:"estimated_cost_cents"`
+	TimeoutSec            int               `json:"timeout_sec"`
+	TimeoutRemainingMS    *int64            `json:"timeout_remaining_ms"`
 }
 
 type sandboxResponse struct {
@@ -230,6 +245,12 @@ func (s *SandboxesService) Create(ctx context.Context, input CreateSandboxInput)
 		Persistent:          input.Persistent,
 		AlwaysOn:            input.AlwaysOn,
 		Region:              input.Region,
+		WorkspaceID:         input.WorkspaceID,
+		WorkspaceSlug:       input.WorkspaceSlug,
+		WorkspaceName:       input.WorkspaceName,
+		ProjectID:           input.ProjectID,
+		ProjectSlug:         input.ProjectSlug,
+		ProjectName:         input.ProjectName,
 		ExternalWorkspaceID: input.ExternalWorkspaceID,
 		ExternalUserID:      input.ExternalUserID,
 		ExternalProjectID:   input.ExternalProjectID,

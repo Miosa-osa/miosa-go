@@ -79,6 +79,9 @@ func TestSandboxesCreateUsesCanonicalFieldsAndIdempotency(t *testing.T) {
 		if body["external_workspace_id"] != "workspace-1" || body["external_user_id"] != "user-1" || body["external_project_id"] != "project-1" {
 			t.Fatalf("missing attribution: %#v", body)
 		}
+		if body["workspace_slug"] != "clinic-iq" || body["project_slug"] != "agent-runtime" {
+			t.Fatalf("missing canonical ownership: %#v", body)
+		}
 		if body["timeout_sec"] != float64(3600) || body["idle_timeout_sec"] != float64(900) || body["disk_size_mb"] != float64(20480) {
 			t.Fatalf("missing lifecycle or disk parameters: %#v", body)
 		}
@@ -103,6 +106,8 @@ func TestSandboxesCreateUsesCanonicalFieldsAndIdempotency(t *testing.T) {
 		Name:                "builder",
 		Size:                miosa.SizeMedium,
 		TemplateID:          "node-22",
+		WorkspaceSlug:       "clinic-iq",
+		ProjectSlug:         "agent-runtime",
 		ExternalWorkspaceID: "workspace-1",
 		ExternalUserID:      "user-1",
 		ExternalProjectID:   "project-1",
