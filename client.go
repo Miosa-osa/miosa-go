@@ -21,7 +21,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "2.0.2"
+	sdkVersion        = "2.0.3"
 )
 
 // ClientOption is a functional option for configuring a Client.
@@ -113,6 +113,7 @@ type Client struct {
 	Audit   *EgressAuditService
 	// Phase 1-4 additions.
 	Quotas *QuotasService
+	Forge *ForgeService
 }
 
 // newDefaultTransport builds an *http.Transport tuned for SDK use:
@@ -218,6 +219,7 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.Network = &EgressNetworkService{client: c}
 	c.Audit = &EgressAuditService{client: c}
 	c.Quotas = &QuotasService{client: c}
+	c.Forge = &ForgeService{client: c}
 	return c
 }
 
