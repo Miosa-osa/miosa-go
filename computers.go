@@ -3,6 +3,9 @@ package miosa
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 )
@@ -23,6 +26,11 @@ type ComputersService struct {
 
 // Create provisions a new computer and returns the full resource.
 func (s *ComputersService) Create(ctx context.Context, input CreateComputerInput) (*Computer, error) {
+	if input.SetupFile != "" {
+		if err := ValidateSetupFile(input.SetupFile); err != nil {
+			return nil, err
+		}
+	}
 	var data ComputerData
 	if err := s.client.postJSON(ctx, "/computers", input, &data); err != nil {
 		return nil, err
@@ -360,36 +368,16 @@ func (c *Computer) Move(ctx context.Context, opts map[string]interface{}) (*Comp
 	return c, nil
 }
 
-// ScreenshotRegion captures a desktop region and returns PNG bytes.
-// It uses POST /computers/:id/desktop/screenshot/region with a JSON body.
+// ScreenshotRegion captures a desktop region and returns PNG bytes
+// (POST /computers/:id/desktop/screenshot/region with a JSON body).
 func (c *Computer) ScreenshotRegion(ctx context.Context, x, y, width, height int) ([]byte, error) {
 	body := map[string]int{"x": x, "y": y, "width": width, "height": height}
-	data, _, err := c.client.getRaw(ctx, fmt.Sprintf(
-		"/computers/%s/desktop/screenshot/region?x=%d&y=%d&width=%d&height=%d",
-		c.ID, x, y, width, height,
-	))
-	if err == nil {
-		return data, nil
-	}
-	// POST fallback — some routes require a body.
-	resp, err2 := c.client.doWithHeaders(ctx, "POST",
-		fmt.Sprintf("/computers/%s/desktop/screenshot/region", c.ID),
-		jsonReader(body), nil,
-	)
-	if err2 != nil {
+	resp, err := c.client.doWithHeaders(ctx, http.MethodPost,
+		fmt.Sprintf("/computers/%s/desktop/screenshot/region", url.PathEscape(c.ID)),
+		jsonReader(body), nil)
+	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	var buf []byte
-	b := make([]byte, 4096)
-	for {
-		n, readErr := resp.Body.Read(b)
-		if n > 0 {
-			buf = append(buf, b[:n]...)
-		}
-		if readErr != nil {
-			break
-		}
-	}
-	return buf, nil
+	return io.ReadAll(resp.Body)
 }

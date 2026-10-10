@@ -121,21 +121,19 @@ func TestEgressSecretsConnect(t *testing.T) {
 			"state":         "abc",
 		})
 	})
-	statusCalls := 0
-	mux.HandleFunc("/egress/oauth/status", func(w http.ResponseWriter, r *http.Request) {
-		statusCalls++
-		if statusCalls < 2 {
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"status": "pending",
-				"state":  r.URL.Query().Get("state"),
-			})
-			return
+	// The API has no status route: completion is a new oauth_connect secret.
+	listCalls := 0
+	mux.HandleFunc("/egress/secrets", func(w http.ResponseWriter, r *http.Request) {
+		listCalls++
+		if got := r.URL.Query().Get("type"); got != "oauth_connect" {
+			t.Errorf("type filter = %q", got)
 		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"status":    "completed",
-			"state":     r.URL.Query().Get("state"),
-			"secret_id": "sec_oauth_1",
-		})
+		secrets := []map[string]interface{}{{"id": "sec_old", "type": "oauth_connect", "oauth_provider": "github"}}
+		// Call 1 is the baseline taken at Connect; call 2 is still pending.
+		if listCalls >= 3 {
+			secrets = append(secrets, map[string]interface{}{"id": "sec_oauth_1", "type": "oauth_connect", "oauth_provider": "github"})
+		}
+		writeJSON(w, http.StatusOK, map[string]interface{}{"data": secrets})
 	})
 	c := newTestClient(t, mux)
 
@@ -268,7 +266,7 @@ func TestEgressNetworkAllowDeny(t *testing.T) {
 func TestEgressNetworkLockdownDefault(t *testing.T) {
 	var gotBody map[string]interface{}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/egress/policies", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/egress/policies/default", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return

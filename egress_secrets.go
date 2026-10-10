@@ -3,7 +3,6 @@ package miosa
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"time"
 )
 
@@ -37,21 +36,23 @@ import (
 // EgressSecretData is the API representation of a stored secret. Values are
 // never returned in plaintext after creation; only MaskedValue is visible.
 type EgressSecretData struct {
-	ID                  string                 `json:"id"`
-	Name                string                 `json:"name,omitempty"`
-	Type                string                 `json:"type,omitempty"`
-	Scope               string                 `json:"scope,omitempty"`
-	WorkspaceID         string                 `json:"workspace_id,omitempty"`
-	OwnerUserID         string                 `json:"owner_user_id,omitempty"`
-	ExternalUserID      string                 `json:"external_user_id,omitempty"`
-	ExternalWorkspaceID string                 `json:"external_workspace_id,omitempty"`
-	ResourceID          string                 `json:"resource_id,omitempty"`
-	ResourceType        string                 `json:"resource_type,omitempty"`
-	MaskedValue         string                 `json:"masked_value,omitempty"`
-	ExpiresAt           string                 `json:"expires_at,omitempty"`
-	Metadata            map[string]interface{} `json:"metadata,omitempty"`
-	CreatedAt           string                 `json:"created_at,omitempty"`
-	UpdatedAt           string                 `json:"updated_at,omitempty"`
+	ID                  string `json:"id"`
+	Name                string `json:"name,omitempty"`
+	Type                string `json:"type,omitempty"`
+	Scope               string `json:"scope,omitempty"`
+	WorkspaceID         string `json:"workspace_id,omitempty"`
+	OwnerUserID         string `json:"owner_user_id,omitempty"`
+	ExternalUserID      string `json:"external_user_id,omitempty"`
+	ExternalWorkspaceID string `json:"external_workspace_id,omitempty"`
+	ResourceID          string `json:"resource_id,omitempty"`
+	ResourceType        string `json:"resource_type,omitempty"`
+	MaskedValue         string `json:"masked_value,omitempty"`
+	// OauthProvider is the provider of an oauth_connect secret.
+	OauthProvider string                 `json:"oauth_provider,omitempty"`
+	ExpiresAt     string                 `json:"expires_at,omitempty"`
+	Metadata      map[string]interface{} `json:"metadata,omitempty"`
+	CreatedAt     string                 `json:"created_at,omitempty"`
+	UpdatedAt     string                 `json:"updated_at,omitempty"`
 }
 
 // EgressBindingData is a single secret-to-resource binding (env-var injection).
@@ -317,13 +318,30 @@ func (s *EgressSecretsService) Connect(ctx context.Context, input OauthConnectIn
 	if result.Provider == "" {
 		result.Provider = input.Provider
 	}
-	return &OAuthFlow{
+	flow := &OAuthFlow{
 		AuthorizeURL: result.AuthorizeURL,
 		State:        result.State,
 		Provider:     result.Provider,
 		Data:         result,
 		client:       s.client,
-	}, nil
+		seen:         map[string]bool{},
+		scope: SecretListInput{
+			Type:                "oauth_connect",
+			OwnerUserID:         input.OwnerUserID,
+			ExternalUserID:      input.ExternalUserID,
+			ExternalWorkspaceID: input.ExternalWorkspaceID,
+			ResourceID:          input.ResourceID,
+			ResourceType:        input.ResourceType,
+		},
+	}
+	// Remember the secrets that exist now: the API reports completion only by
+	// creating a new oauth_connect secret and redirecting the browser.
+	if existing, err := s.List(ctx, flow.scope); err == nil {
+		for _, sec := range existing {
+			flow.seen[sec.ID] = true
+		}
+	}
+	return flow, nil
 }
 
 // ─── OAuth flow handle ───────────────────────────────────────────────────────
@@ -335,6 +353,10 @@ type OAuthFlow struct {
 	Provider     string
 	Data         *OauthStartResult
 	client       *Client
+	// seen holds the ids of the oauth_connect secrets that existed when the
+	// flow started, so a new one can be told apart.
+	seen  map[string]bool
+	scope SecretListInput
 }
 
 // WaitForCompletionOptions tunes WaitForCompletion polling.
@@ -359,15 +381,28 @@ func (o WaitForCompletionOptions) pollInterval() time.Duration {
 	return o.PollInterval
 }
 
-// Status polls GET /egress/oauth/status?state=... once and returns the
-// current state. Useful for callers that want to drive their own polling
-// loop. WaitForCompletion is the convenience wrapper.
+// Status reports whether the flow has completed. The API has no status route:
+// when the user finishes consent the callback creates an oauth_connect secret
+// and redirects the browser. Status therefore lists the oauth_connect secrets
+// in the flow's scope and reports "completed" with SecretID once one appears
+// that did not exist when the flow started, else "pending". It never reports
+// a failed or denied consent, which only the browser sees; bound
+// WaitForCompletion with a timeout.
 func (f *OAuthFlow) Status(ctx context.Context) (*OauthStatusResult, error) {
-	var env oauthStatusEnvelope
-	if err := f.client.getJSON(ctx, "/egress/oauth/status?state="+url.QueryEscape(f.State), &env); err != nil {
+	secrets, err := f.client.Secrets.List(ctx, f.scope)
+	if err != nil {
 		return nil, err
 	}
-	return oauthStatusFrom(env), nil
+	for _, sec := range secrets {
+		if f.seen[sec.ID] || (sec.Type != "" && sec.Type != "oauth_connect") {
+			continue
+		}
+		if sec.OauthProvider != "" && f.Provider != "" && sec.OauthProvider != f.Provider {
+			continue
+		}
+		return &OauthStatusResult{Status: "completed", State: f.State, SecretID: sec.ID}, nil
+	}
+	return &OauthStatusResult{Status: "pending", State: f.State}, nil
 }
 
 // WaitForCompletion polls /egress/oauth/status until the flow completes,

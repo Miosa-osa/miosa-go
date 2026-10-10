@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -49,6 +50,84 @@ type Run struct {
 	FinishedAt          string                 `json:"finished_at,omitempty"`
 	CreatedAt           string                 `json:"created_at,omitempty"`
 	UpdatedAt           string                 `json:"updated_at,omitempty"`
+
+	// Chat and harness session (docs/api/harness-sessions.md).
+	ChatID             string `json:"chat_id,omitempty"`
+	HarnessSessionID   string `json:"harness_session_id,omitempty"`
+	ContinuedFromRunID string `json:"continued_from_run_id,omitempty"`
+	// Overdrive is true when the harness ran with its approval bypass, false
+	// when it did not, nil for runs that are not harness runs.
+	Overdrive *bool `json:"overdrive,omitempty"`
+	// SessionMode is "new", "resumed" or "reseeded"; "" for non-harness runs.
+	SessionMode string `json:"session_mode,omitempty"`
+	// Context is the harness context meter once the run finished.
+	Context map[string]interface{} `json:"context,omitempty"`
+
+	// Agent binding and origin.
+	AgentDefinitionID string `json:"agent_definition_id,omitempty"`
+	AgentVersionID    string `json:"agent_version_id,omitempty"`
+	// Source is console, api, workflow, trigger, test or a client value.
+	Source string `json:"source,omitempty"`
+	// Machine is the platform-provisioned machine lease, nil for a run on a
+	// caller-named target.
+	Machine *RunMachine `json:"machine,omitempty"`
+	// Cost is the MIOSA credits the run used; nil until the run finishes.
+	Cost   *RunCost   `json:"cost,omitempty"`
+	Notify *RunNotify `json:"notify,omitempty"`
+	// ProviderCost is the user's own provider spend, set when a Claude Code,
+	// Codex or OSA run finishes. Nil while the run is queued or running.
+	ProviderCost *ProviderCost `json:"provider_cost,omitempty"`
+}
+
+// RunMachine is the machine lease of a run that provisions its own machine.
+type RunMachine struct {
+	LeaseID string `json:"lease_id,omitempty"`
+	Kind    string `json:"kind"`
+	ID      string `json:"id"`
+	// Origin is "provisioned" or "bound".
+	Origin string `json:"origin"`
+	// State is provisioning, ready or released.
+	State              string `json:"state"`
+	Reused             bool   `json:"reused"`
+	Reuse              string `json:"reuse,omitempty"`
+	AfterRun           string `json:"after_run,omitempty"`
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds,omitempty"`
+	ReleaseAction      string `json:"release_action,omitempty"`
+	ReleasedAt         string `json:"released_at,omitempty"`
+}
+
+// RunCost is the MIOSA credits (cents) a run used.
+type RunCost struct {
+	ModelCredits     *int64 `json:"model_credits"`
+	MachineCredits   int64  `json:"machine_credits"`
+	TotalCredits     int64  `json:"total_credits"`
+	ModelMetered     bool   `json:"model_metered"`
+	MachineEstimated bool   `json:"machine_estimated"`
+	ComputedAt       string `json:"computed_at,omitempty"`
+}
+
+// RunNotify says who is told when a run finishes.
+type RunNotify struct {
+	Email     bool     `json:"email"`
+	WebhookID string   `json:"webhook_id,omitempty"`
+	On        []string `json:"on,omitempty"`
+}
+
+// ProviderCost is a run's spend on the user's own model provider key or
+// subscription (docs/api/agent-usage-and-cost.md).
+type ProviderCost struct {
+	InputTokens      int64 `json:"input_tokens"`
+	OutputTokens     int64 `json:"output_tokens"`
+	CacheReadTokens  int64 `json:"cache_read_tokens"`
+	CacheWriteTokens int64 `json:"cache_write_tokens"`
+	// EstimatedUSD is nil for a subscription login and for a model the catalog
+	// has no price for.
+	EstimatedUSD *float64 `json:"estimated_usd"`
+	// Source is "harness" (the harness reported the cost) or "catalog".
+	Source string `json:"source"`
+	Model  string `json:"model"`
+	// BilledTo is "subscription" or "own_key".
+	BilledTo string `json:"billed_to"`
 }
 
 type RunMessage struct {
@@ -161,6 +240,55 @@ type RunCreateInput struct {
 	ApprovalPolicy          map[string]interface{} `json:"approval_policy,omitempty"`
 	CapabilityRequirements  []string               `json:"capability_requirements,omitempty"`
 	Metadata                map[string]interface{} `json:"metadata,omitempty"`
+
+	// Prompt path (docs/api/agents.md): an Instruction with no Runner runs on
+	// the scope's default harness and its default model.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// AgentDefinitionID and AgentVersionID bind the run to an agent.
+	AgentDefinitionID string `json:"agent_definition_id,omitempty"`
+	AgentVersionID    string `json:"agent_version_id,omitempty"`
+
+	// Chat sessions (docs/api/harness-sessions.md). ChatID alone continues the
+	// chat: one chat is one harness session. ContinueFromRunID names a run
+	// explicitly; 409 RUN_SESSION_NOT_RESUMABLE when it cannot be resumed.
+	ChatID            string `json:"chat_id,omitempty"`
+	ContinueFromRunID string `json:"continue_from_run_id,omitempty"`
+
+	// Run on a platform machine (docs/api/agents-run-anywhere.md). Target "new"
+	// is mutually exclusive with SandboxID, ComputerID and TargetID.
+	Target      string             `json:"target,omitempty"`
+	WorkspaceID string             `json:"workspace_id,omitempty"`
+	ProjectID   string             `json:"project_id,omitempty"`
+	Machine     *RunMachineRequest `json:"machine,omitempty"`
+	Notify      *RunNotify         `json:"notify,omitempty"`
+	// Source is a client label (up to 40 characters); workflow and trigger
+	// are reserved for the platform.
+	Source string `json:"source,omitempty"`
+
+	// Environment names the environment a machine started for this run gets
+	// (Target "new"); EnvironmentID picks one by id. NoEnv gives it nothing of
+	// the owner's.
+	Environment   string `json:"environment,omitempty"`
+	EnvironmentID string `json:"environment_id,omitempty"`
+	NoEnv         bool   `json:"no_env,omitempty"`
+}
+
+// RunMachineRequest overrides an agent's machine policy for one run, or is the
+// whole policy for a run with no agent.
+type RunMachineRequest struct {
+	// Target is "sandbox" (default) or "computer".
+	Target     string `json:"target,omitempty"`
+	ComputerID string `json:"computer_id,omitempty"`
+	Template   string `json:"template,omitempty"`
+	Size       string `json:"size,omitempty"`
+	// Reuse is "run" (default) or "chat".
+	Reuse string `json:"reuse,omitempty"`
+	// AfterRun is "destroy" (default), "pause" or "keep".
+	AfterRun           string `json:"after_run,omitempty"`
+	IdleTimeoutSeconds int    `json:"idle_timeout_seconds,omitempty"`
+	ComputerUse        *bool  `json:"computer_use,omitempty"`
+	// EnvironmentID names the environment the machine starts from.
+	EnvironmentID string `json:"environment_id,omitempty"`
 }
 
 type RunListInput struct {
@@ -173,6 +301,20 @@ type RunListInput struct {
 	ExternalUserID      string
 	ExternalProjectID   string
 	Status              RunStatus
+
+	// Filters added with chats and agents.
+	WorkspaceID       string
+	ProjectID         string
+	Runner            string
+	AgentDefinitionID string
+	AgentVersionID    string
+	// Harness is claude-code, codex, osa or custom.
+	Harness          string
+	HarnessSessionID string
+	// ChatID loads a chat's history: newest first, pair with Limit 200.
+	ChatID string
+	Source string
+	Limit  int
 }
 
 type RunWaitOptions struct {
@@ -192,6 +334,18 @@ func (s *RunsService) List(ctx context.Context, input RunListInput) ([]Run, erro
 		"external_user_id":      input.ExternalUserID,
 		"external_project_id":   input.ExternalProjectID,
 		"status":                string(input.Status),
+		"workspace_id":          input.WorkspaceID,
+		"project_id":            input.ProjectID,
+		"runner":                input.Runner,
+		"agent_definition_id":   input.AgentDefinitionID,
+		"agent_version_id":      input.AgentVersionID,
+		"harness":               input.Harness,
+		"harness_session_id":    input.HarnessSessionID,
+		"chat_id":               input.ChatID,
+		"source":                input.Source,
+	}
+	if input.Limit > 0 {
+		params["limit"] = strconv.Itoa(input.Limit)
 	}
 	var envelope apiResponse[[]Run]
 	if err := s.client.getJSON(ctx, "/runs"+buildQuery(params), &envelope); err != nil {
@@ -332,4 +486,104 @@ func minDuration(a, b time.Duration) time.Duration {
 		return a
 	}
 	return b
+}
+
+// RunUsageGroupBy is a dimension of RunUsageOptions.GroupBy.
+type RunUsageGroupBy string
+
+const (
+	RunUsageByAgent     RunUsageGroupBy = "agent"
+	RunUsageByChat      RunUsageGroupBy = "chat"
+	RunUsageByWorkspace RunUsageGroupBy = "workspace"
+	RunUsageByDay       RunUsageGroupBy = "day"
+	RunUsageByModel     RunUsageGroupBy = "model"
+	RunUsageByHarness   RunUsageGroupBy = "harness"
+)
+
+// RunUsageOptions selects the window, filters and grouping of Usage.
+type RunUsageOptions struct {
+	// GroupBy groups by every combination of the listed dimensions; empty
+	// returns totals only.
+	GroupBy []RunUsageGroupBy
+	// From and To are ISO 8601 datetimes or dates (a date is UTC midnight). The
+	// window is [From, To) on the run's finished_at; the default is the last
+	// 30 days and at most 366 days are allowed.
+	From string
+	To   string
+
+	AgentDefinitionID string
+	WorkspaceID       string
+	ChatID            string
+	// Harness is claude-code, codex or osa.
+	Harness string
+	Model   string
+	// BilledTo is "own_key" or "subscription".
+	BilledTo string
+	// Limit caps the groups returned (default 500, at most 2000).
+	Limit int
+}
+
+// RunUsageCounters are the counters every total and group carries.
+// PricedRuns + SubscriptionRuns + UnpricedRuns = Runs.
+type RunUsageCounters struct {
+	Runs             int     `json:"runs"`
+	InputTokens      int64   `json:"input_tokens"`
+	OutputTokens     int64   `json:"output_tokens"`
+	CacheReadTokens  int64   `json:"cache_read_tokens"`
+	CacheWriteTokens int64   `json:"cache_write_tokens"`
+	TotalTokens      int64   `json:"total_tokens"`
+	EstimatedUSD     float64 `json:"estimated_usd"`
+	PricedRuns       int     `json:"priced_runs"`
+	SubscriptionRuns int     `json:"subscription_runs"`
+	// UnpricedRuns are own-key runs on a model the catalog does not price:
+	// their tokens are real but their cost is unknown.
+	UnpricedRuns int `json:"unpriced_runs"`
+}
+
+// RunUsageGroup is one row of a grouped usage report. Key holds the grouping
+// dimensions (agent_definition_id, chat_id, workspace_id, day, model,
+// harness); a value is nil for runs without it.
+type RunUsageGroup struct {
+	Key map[string]*string `json:"key"`
+	RunUsageCounters
+}
+
+// RunUsage sums provider cost over the tenant's finished runs.
+type RunUsage struct {
+	From    string           `json:"from"`
+	To      string           `json:"to"`
+	GroupBy []string         `json:"group_by"`
+	Totals  RunUsageCounters `json:"totals"`
+	Groups  []RunUsageGroup  `json:"groups"`
+	// More is true when Limit groups came back and more may exist (the API
+	// field is named truncated).
+	More bool `json:"truncated"`
+}
+
+// Usage returns the user's own model spend over finished runs, overall and
+// grouped (GET /runs/usage). An agent key sees only its own agents' runs.
+func (s *RunsService) Usage(ctx context.Context, opts RunUsageOptions) (*RunUsage, error) {
+	groups := make([]string, 0, len(opts.GroupBy))
+	for _, g := range opts.GroupBy {
+		groups = append(groups, string(g))
+	}
+	params := map[string]string{
+		"group_by":            strings.Join(groups, ","),
+		"from":                opts.From,
+		"to":                  opts.To,
+		"agent_definition_id": opts.AgentDefinitionID,
+		"workspace_id":        opts.WorkspaceID,
+		"chat_id":             opts.ChatID,
+		"harness":             opts.Harness,
+		"model":               opts.Model,
+		"billed_to":           opts.BilledTo,
+	}
+	if opts.Limit > 0 {
+		params["limit"] = strconv.Itoa(opts.Limit)
+	}
+	var envelope apiResponse[RunUsage]
+	if err := s.client.getJSON(ctx, "/runs/usage"+buildQuery(params), &envelope); err != nil {
+		return nil, fmt.Errorf("RunsService.Usage: %w", err)
+	}
+	return &envelope.Data, nil
 }

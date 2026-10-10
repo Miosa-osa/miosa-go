@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -199,7 +200,7 @@ func (r *jsonBodyReader) Read(p []byte) (int, error) {
 		return 0, r.err
 	}
 	if r.pos >= len(r.data) {
-		return 0, fmt.Errorf("EOF")
+		return 0, io.EOF
 	}
 	n := copy(p, r.data[r.pos:])
 	r.pos += n

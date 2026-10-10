@@ -2,6 +2,7 @@ package miosa
 
 import (
 	"context"
+	"net/url"
 )
 
 // ─── Egress network — policies, allowlist, suggestions ───────────────────────
@@ -236,8 +237,8 @@ type LockdownInput struct {
 
 // Lockdown sets the policy to mode=enforce — denied requests are blocked.
 //
-// With no PolicyID and no ResourceID/ResourceType the tenant-default policy
-// is updated via PATCH /egress/policies.
+// With no PolicyID and no ResourceID the tenant-default policy is updated via
+// PATCH /egress/policies/default. A ResourceID selects that resource's policy.
 func (s *EgressNetworkService) Lockdown(ctx context.Context, input LockdownInput) (*EgressPolicy, error) {
 	return s.setMode(ctx, "enforce", input)
 }
@@ -249,11 +250,11 @@ func (s *EgressNetworkService) Observe(ctx context.Context, input LockdownInput)
 }
 
 func (s *EgressNetworkService) setMode(ctx context.Context, mode string, input LockdownInput) (*EgressPolicy, error) {
-	if input.PolicyID == "" && (input.ResourceID == "" || input.ResourceType == "") {
+	if input.PolicyID == "" && input.ResourceID == "" {
 		// Tenant-default policy
 		body := map[string]interface{}{"mode": mode}
 		var env policyEnvelope
-		if err := s.client.patchJSON(ctx, "/egress/policies", body, &env); err != nil {
+		if err := s.client.patchJSON(ctx, "/egress/policies/default", body, &env); err != nil {
 			return nil, err
 		}
 		return policyFrom(env), nil
@@ -261,13 +262,10 @@ func (s *EgressNetworkService) setMode(ctx context.Context, mode string, input L
 	if input.PolicyID != "" {
 		return s.UpdatePolicy(ctx, input.PolicyID, PolicyUpdateInput{Mode: mode})
 	}
-	body := map[string]interface{}{
-		"mode":          mode,
-		"resource_id":   input.ResourceID,
-		"resource_type": input.ResourceType,
-	}
+	// The update route resolves its :id as a policy id or a resource id.
+	body := map[string]interface{}{"mode": mode}
 	var env policyEnvelope
-	if err := s.client.patchJSON(ctx, "/egress/policies", body, &env); err != nil {
+	if err := s.client.patchJSON(ctx, "/egress/policies/"+url.PathEscape(input.ResourceID), body, &env); err != nil {
 		return nil, err
 	}
 	return policyFrom(env), nil

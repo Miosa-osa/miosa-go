@@ -123,7 +123,7 @@ func TestSnapshotsDelete(t *testing.T) {
 
 func TestRestoreComputer(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/snapshots/snap_r/restore", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/snapshots/snap_r/fork", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return

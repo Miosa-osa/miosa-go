@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
@@ -40,9 +41,8 @@ func (s *EventsService) Subscribe(ctx context.Context, opts EventSubscribeOption
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 
-	header := make(map[string][]string)
-	header["Authorization"] = []string{"Bearer " + s.client.apiKey}
-	header["User-Agent"] = []string{"miosa-go/" + sdkVersion}
+	header := http.Header{}
+	s.client.setAuthHeaders(ctx, header)
 
 	dialer := websocket.DefaultDialer
 	conn, _, err := dialer.DialContext(ctx, wsURL, header)

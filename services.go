@@ -111,10 +111,9 @@ func (s *ServicesService) Logs(ctx context.Context, id string) (*ServiceLogStrea
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.client.apiKey)
+	s.client.setAuthHeaders(ctx, req.Header)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
 
 	resp, err := s.client.httpClient.Do(req)
 	if err != nil {

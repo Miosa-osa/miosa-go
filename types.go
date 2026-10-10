@@ -44,6 +44,11 @@ type ComputerData struct {
 	PreviewDomain string             `json:"preview_domain"`
 	CreatedAt     string             `json:"created_at"`
 	UpdatedAt     string             `json:"updated_at"`
+
+	// MachineEnvironment and MachineSetup are the environment and setup
+	// blocks of the computer JSON.
+	MachineEnvironment
+	MachineSetup
 }
 
 // CreateComputerInput is the request body for POST /computers.
@@ -59,6 +64,18 @@ type CreateComputerInput struct {
 	ExternalWorkspaceID string `json:"external_workspace_id,omitempty"`
 	ExternalUserID      string `json:"external_user_id,omitempty"`
 	ExternalProjectID   string `json:"external_project_id,omitempty"`
+
+	// Environment names the environment the computer starts from;
+	// EnvironmentID picks one by id. Neither means the workspace's default.
+	Environment   string `json:"environment,omitempty"`
+	EnvironmentID string `json:"environment_id,omitempty"`
+	// NoEnv gives the computer nothing of the owner's, permanently.
+	NoEnv bool `json:"no_env,omitempty"`
+	// SetupFile is a script run once in the background after the computer is
+	// ready (UTF-8, at most 64 KiB, no NUL byte).
+	SetupFile string `json:"setup_file,omitempty"`
+	// BillTo bills this create to an organization (id, slug or name).
+	BillTo string `json:"bill_to,omitempty"`
 }
 
 // ListComputersInput are optional query parameters for GET /computers.

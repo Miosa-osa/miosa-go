@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -76,13 +79,52 @@ func (s *OcHostsService) Get(ctx context.Context, id string) (*HostData, error) 
 	return &out, nil
 }
 
-// Update patches a host's name or labels.
+// Update is not supported by the API: there is no route to rename a host or
+// change its labels (PATCH /opencomputers/hosts/:id does not exist). It returns
+// an error without sending a request.
+//
+// Deprecated: use SetTags, AddTag and RemoveTag, the only host metadata the
+// API lets you change.
 func (s *OcHostsService) Update(ctx context.Context, id string, in UpdateHostInput) (*HostData, error) {
-	var out HostData
-	if err := s.client.patchJSON(ctx, "/opencomputers/hosts/"+id, in, &out); err != nil {
+	return nil, &MiosaError{
+		StatusCode: http.StatusNotImplemented,
+		Code:       "UNSUPPORTED",
+		Message:    "the API cannot rename a host or change its labels; use SetTags, AddTag and RemoveTag",
+	}
+}
+
+// HostTags is a host's tag list as the tag routes return it.
+type HostTags struct {
+	ID   string   `json:"id"`
+	Tags []string `json:"tags"`
+}
+
+func (s *OcHostsService) tagsCall(ctx context.Context, method, path string, body interface{}) (*HostTags, error) {
+	var out struct {
+		Host HostTags `json:"host"`
+	}
+	if err := s.client.sendJSON(ctx, method, path, body, &out); err != nil {
 		return nil, err
 	}
-	return &out, nil
+	return &out.Host, nil
+}
+
+// SetTags replaces the host's whole tag list (PATCH /opencomputers/hosts/:id/tags).
+func (s *OcHostsService) SetTags(ctx context.Context, id string, tags []string) (*HostTags, error) {
+	if tags == nil {
+		tags = []string{}
+	}
+	return s.tagsCall(ctx, http.MethodPatch, "/opencomputers/hosts/"+url.PathEscape(id)+"/tags", map[string][]string{"tags": tags})
+}
+
+// AddTag adds one tag; adding an existing tag is a no-op.
+func (s *OcHostsService) AddTag(ctx context.Context, id, tag string) (*HostTags, error) {
+	return s.tagsCall(ctx, http.MethodPost, "/opencomputers/hosts/"+url.PathEscape(id)+"/tags/"+url.PathEscape(tag), nil)
+}
+
+// RemoveTag removes one tag.
+func (s *OcHostsService) RemoveTag(ctx context.Context, id, tag string) (*HostTags, error) {
+	return s.tagsCall(ctx, http.MethodDelete, "/opencomputers/hosts/"+url.PathEscape(id)+"/tags/"+url.PathEscape(tag), nil)
 }
 
 // Revoke permanently removes a host registration.
@@ -464,9 +506,8 @@ func streamSSE[T any](ctx context.Context, c *Client, path string) (<-chan T, er
 	if err != nil {
 		return nil, fmt.Errorf("building SSE request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	c.setAuthHeaders(ctx, req.Header)
 	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -525,4 +566,93 @@ func consumeSSE[T any](ctx context.Context, r io.Reader, ch chan<- T) {
 		}
 		// event:, id:, retry: fields — ignore for now
 	}
+}
+
+// ─── Start-job route (2026-10) ────────────────────────────────────────────────
+
+// StartJobInput is the body of POST /opencomputers/hosts/:id/jobs.
+type StartJobInput struct {
+	// Command is the program or shell line, 1 to 8192 characters.
+	Command string `json:"command"`
+	// Args is at most 256 strings.
+	Args []string `json:"args,omitempty"`
+	// Env is NAME to value. Host secrets are added; a name given here wins.
+	Env map[string]string `json:"env,omitempty"`
+	// Cwd is the working directory on the host (default "~").
+	Cwd string `json:"cwd,omitempty"`
+	// TimeoutSeconds is 1 to 3600 (default 30).
+	TimeoutSeconds int `json:"timeout,omitempty"`
+}
+
+// OcJob is a remote exec job as the jobs routes return it.
+type OcJob struct {
+	ID        string   `json:"id"`
+	HostID    string   `json:"host_id"`
+	TenantID  string   `json:"tenant_id,omitempty"`
+	Cmd       string   `json:"cmd"`
+	Args      []string `json:"args"`
+	Cwd       string   `json:"cwd,omitempty"`
+	TimeoutMS int64    `json:"timeout_ms"`
+	// State is queued, running, done, failed or canceled.
+	State      string `json:"state"`
+	ExitCode   *int   `json:"exit_code"`
+	StartedAt  string `json:"started_at,omitempty"`
+	EndedAt    string `json:"ended_at,omitempty"`
+	InsertedAt string `json:"inserted_at,omitempty"`
+}
+
+// StartedJob is the 202 answer of starting a job.
+type StartedJob struct {
+	Job OcJob `json:"job"`
+	// Links are the job and stream paths.
+	Links struct {
+		Job    string `json:"job"`
+		Stream string `json:"stream"`
+	} `json:"links"`
+}
+
+// Start dispatches a command to the host and returns at once with the job
+// (202); it does not hold the connection like Run. Follow it with Get or
+// Stream and cancel it with Cancel. Needs opencomputers:write. A host that is
+// not connected is 409, other dispatch errors 502.
+func (s *OcJobsService) Start(ctx context.Context, hostID string, in StartJobInput) (*StartedJob, error) {
+	if in.Command == "" {
+		return nil, errors.New("command is required")
+	}
+	var out StartedJob
+	if err := s.client.postJSON(ctx, "/opencomputers/hosts/"+url.PathEscape(hostID)+"/jobs", in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// JobActivity is one job entry of a host's audit trail.
+type JobActivity struct {
+	ID    string `json:"id"`
+	JobID string `json:"job_id"`
+	Kind  string `json:"kind,omitempty"`
+	// Status is dispatched, done or failed.
+	Status       string                 `json:"status"`
+	DurationMS   *int64                 `json:"duration_ms"`
+	DispatchedAt string                 `json:"dispatched_at,omitempty"`
+	CompletedAt  string                 `json:"completed_at,omitempty"`
+	EventAt      string                 `json:"event_at,omitempty"`
+	Payload      map[string]interface{} `json:"payload,omitempty"`
+}
+
+// Activity returns the most recent job dispatch and completion events of a
+// host, newest first (GET /opencomputers/hosts/:id/jobs). limit defaults to 20,
+// at most 100.
+func (s *OcJobsService) Activity(ctx context.Context, hostID string, limit int) ([]JobActivity, error) {
+	q := map[string]string{}
+	if limit > 0 {
+		q["limit"] = strconv.Itoa(limit)
+	}
+	var out struct {
+		Jobs []JobActivity `json:"jobs"`
+	}
+	if err := s.client.getJSON(ctx, "/opencomputers/hosts/"+url.PathEscape(hostID)+"/jobs"+buildQuery(q), &out); err != nil {
+		return nil, err
+	}
+	return out.Jobs, nil
 }

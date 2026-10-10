@@ -2,6 +2,7 @@ package miosa
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 )
@@ -88,6 +89,14 @@ type PublicForkSandboxInput struct {
 	TemplateID string `json:"template_id,omitempty"`
 	// IdempotencyKey is sent as the Idempotency-Key header.
 	IdempotencyKey string `json:"-"`
+
+	// MachineEnvironmentOptions picks the fork's environment. With none named
+	// the fork inherits its source's; a fork's secrets come only from its own
+	// environment. A copy that would restore memory its environment must not
+	// receive is refused with *EnvironmentMemoryWithheldError, and a source
+	// whose delivered secrets could not be removed first with the retryable
+	// *EnvironmentScrubFailedError.
+	MachineEnvironmentOptions
 }
 
 func forkIdempotencyKey(provided string) (string, error) {
@@ -112,7 +121,8 @@ func (s *SandboxesService) Fork(ctx context.Context, sandboxID string, input For
 	return &out, nil
 }
 
-// ForkSandbox creates a native sandbox from a copy-on-write snapshot.
+// ForkSandbox creates a native sandbox from a copy-on-write snapshot (a live
+// fork of a running sandbox).
 // Fork remains available for compatibility with callers expecting Computer.
 func (s *SandboxesService) ForkSandbox(ctx context.Context, sandboxID string, input PublicForkSandboxInput) (*Sandbox, error) {
 	idempotencyKey, err := forkIdempotencyKey(input.IdempotencyKey)
@@ -404,6 +414,60 @@ type QuotaData struct {
 	MaxCreditCents *int   `json:"max_credit_cents,omitempty"`
 	// Current usage
 	CurrentSandboxes int `json:"current_sandboxes,omitempty"`
+
+	// Limits and Usage are the shape the API actually returns:
+	// {"data": {"external_user_id", "limits": {...}, "usage": {...}}}. The flat
+	// fields above are filled from them.
+	Limits QuotaLimits `json:"limits"`
+	Usage  QuotaUsage  `json:"usage"`
+}
+
+// QuotaLimits are an external user's explicit caps; nil means the tenant
+// default applies.
+type QuotaLimits struct {
+	MaxSandboxes   *int `json:"max_sandboxes"`
+	MaxConcurrent  *int `json:"max_concurrent"`
+	MaxStorageGB   *int `json:"max_storage_gb"`
+	MaxCreditCents *int `json:"max_credit_cents"`
+}
+
+// QuotaUsage is what an external user has used.
+type QuotaUsage struct {
+	TotalSandboxes int `json:"total_sandboxes"`
+	Concurrent     int `json:"concurrent"`
+}
+
+// UnmarshalJSON accepts the enveloped, nested form the API sends and the flat
+// form older builds documented.
+func (q *QuotaData) UnmarshalJSON(b []byte) error {
+	var probe struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(b, &probe) == nil && len(probe.Data) > 0 && probe.Data[0] == '{' {
+		b = probe.Data
+	}
+	type plain QuotaData
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	if p.MaxSandboxes == nil {
+		p.MaxSandboxes = p.Limits.MaxSandboxes
+	}
+	if p.MaxConcurrent == nil {
+		p.MaxConcurrent = p.Limits.MaxConcurrent
+	}
+	if p.MaxStorageGB == nil {
+		p.MaxStorageGB = p.Limits.MaxStorageGB
+	}
+	if p.MaxCreditCents == nil {
+		p.MaxCreditCents = p.Limits.MaxCreditCents
+	}
+	if p.CurrentSandboxes == 0 {
+		p.CurrentSandboxes = p.Usage.TotalSandboxes
+	}
+	*q = QuotaData(p)
+	return nil
 }
 
 // SetQuotaInput is the request body for Set.
@@ -449,6 +513,8 @@ type UsageRollupInput struct {
 	End    string
 	// ExternalUserID narrows results to a single user.
 	ExternalUserID string
+	// Bucket adds a time series: "hour", "day" or "month".
+	Bucket string
 }
 
 // UsageRollupResult is the response from the /usage rollup endpoint.
@@ -456,6 +522,23 @@ type UsageRollupResult struct {
 	PeriodStart string           `json:"period_start"`
 	PeriodEnd   string           `json:"period_end"`
 	Results     []UsageRollupRow `json:"results"`
+	// Bucket echoes the requested bucket; Timeseries is set when one was asked for.
+	Bucket         string             `json:"bucket,omitempty"`
+	Timeseries     []UsageSeriesPoint `json:"timeseries,omitempty"`
+	Limit          int                `json:"limit,omitempty"`
+	Offset         int                `json:"offset,omitempty"`
+	TotalGroups    int                `json:"total_groups,omitempty"`
+	Truncated      bool               `json:"truncated,omitempty"`
+	AsOf           string             `json:"as_of,omitempty"`
+	WorkspaceID    string             `json:"workspace_id,omitempty"`
+	ResourceFamily string             `json:"resource_family,omitempty"`
+	FilterValue    string             `json:"filter_value,omitempty"`
+}
+
+// UsageSeriesPoint is one bucket of a usage time series.
+type UsageSeriesPoint struct {
+	PeriodStart string `json:"period_start"`
+	CreditCents int64  `json:"credit_cents"`
 }
 
 // UsageRollupRow is one grouped row.
@@ -486,6 +569,9 @@ func (s *UsageService) GetRollup(ctx context.Context, input UsageRollupInput) (*
 	}
 	if input.ExternalUserID != "" {
 		params["external_user_id"] = input.ExternalUserID
+	}
+	if input.Bucket != "" {
+		params["bucket"] = input.Bucket
 	}
 	var out UsageRollupResult
 	if err := s.client.getJSON(ctx, "/usage"+buildQuery(params), &out); err != nil {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
+	"net/http"
+	"strconv"
+	"time"
 )
 
 // SandboxTemplate is the template slug used for the lightweight code-exec
@@ -19,6 +21,8 @@ const SandboxTemplate = "miosa-sandbox"
 // template; every computer method works identically.
 type SandboxesService struct {
 	client *Client
+	// Batches creates and tracks many sandboxes at once.
+	Batches *SandboxBatchesService
 }
 
 // CreateSandboxInput is the request body for Create. Template defaults to
@@ -55,6 +59,26 @@ type CreateSandboxInput struct {
 	ExternalProjectID   string `json:"external_project_id,omitempty"`
 	// IdempotencyKey prevents duplicate sandboxes when a create request is retried.
 	IdempotencyKey string `json:"-"`
+
+	// Environment names the environment the sandbox starts from; EnvironmentID
+	// picks one by id. Neither means the workspace's effective default.
+	Environment   string `json:"-"`
+	EnvironmentID string `json:"-"`
+	// NoEnv gives the sandbox nothing of the owner's, permanently.
+	NoEnv bool `json:"-"`
+	// SetupFile is a script run once in the background after the sandbox is
+	// ready (UTF-8, at most 64 KiB, no NUL byte). See SetupStatus on the result.
+	SetupFile string `json:"-"`
+	// BillTo bills this create to an organization (id, slug or name) instead of
+	// the account setting. Sent as the bill_to body parameter.
+	BillTo string `json:"-"`
+	// WaitSeconds makes the create request itself wait up to that many seconds
+	// (2 to 120) for the sandbox to be ready. The create answers 201 either
+	// way; check Ready, or CreateSandboxResult.WaitOutcome.
+	WaitSeconds int `json:"-"`
+	// WaitForReady waits for readiness with the API's default budget (30 s) and
+	// fails with 504 SANDBOX_READY_TIMEOUT if the sandbox is not ready.
+	WaitForReady bool `json:"-"`
 }
 
 // SandboxResourceContract is the exact, versioned shape assigned to a sandbox.
@@ -126,6 +150,11 @@ type Sandbox struct {
 	ReadyAt             string                   `json:"ready_at"`
 	DestroyedAt         string                   `json:"destroyed_at"`
 	TotalRuntimeSec     int                      `json:"total_runtime_sec"`
+
+	// MachineEnvironment and MachineSetup are the environment and setup
+	// blocks of the sandbox JSON.
+	MachineEnvironment
+	MachineSetup
 }
 
 type createSandboxRequest struct {
@@ -152,6 +181,11 @@ type createSandboxRequest struct {
 	ExternalUserID      string            `json:"external_user_id,omitempty"`
 	ExternalProjectID   string            `json:"external_project_id,omitempty"`
 	AllowProvision      *bool             `json:"allow_provision,omitempty"`
+	Environment         string            `json:"environment,omitempty"`
+	EnvironmentID       string            `json:"environment_id,omitempty"`
+	NoEnv               bool              `json:"no_env,omitempty"`
+	SetupFile           string            `json:"setup_file,omitempty"`
+	BillTo              string            `json:"bill_to,omitempty"`
 }
 
 // ListSandboxesInput contains canonical tenant-scoped sandbox filters.
@@ -159,6 +193,73 @@ type ListSandboxesInput struct {
 	ExternalWorkspaceID string
 	ExternalUserID      string
 	ExternalProjectID   string
+
+	// WorkspaceID and ProjectID narrow to a workspace or project. A
+	// workspace-bound key or scoped token is always limited to its own.
+	WorkspaceID string
+	ProjectID   string
+	// Tags keeps only sandboxes whose tags contain every key and value
+	// (tags[key]=value).
+	Tags map[string]string
+	// State is one lifecycle state; naming "error" lists errored sandboxes only.
+	State      string
+	TemplateID string
+	// Search is a substring of name, id or slug.
+	Search string
+	// Sort defaults to "created-desc".
+	Sort string
+	// IncludeErrored shows errored sandboxes beside the rest. Nil leaves the
+	// server default, which is on when an external attribution filter is given.
+	IncludeErrored *bool
+	// Page starts at 1; Limit defaults to 50.
+	Page  int
+	Limit int
+}
+
+// SandboxPageMeta is the paging block of a sandbox list.
+type SandboxPageMeta struct {
+	Page        int  `json:"page"`
+	Limit       int  `json:"limit"`
+	Total       int  `json:"total"`
+	TotalPages  int  `json:"total_pages"`
+	HasNextPage bool `json:"has_next_page"`
+	// StateCounts counts every sandbox in the account by state, so errored
+	// rows are visible even when the page hides them.
+	StateCounts      map[string]int `json:"state_counts"`
+	ReservedMemoryMB int64          `json:"reserved_memory_mb"`
+}
+
+// SandboxPage is one page of sandboxes.
+type SandboxPage struct {
+	Data []Sandbox       `json:"data"`
+	Meta SandboxPageMeta `json:"meta"`
+}
+
+func (in ListSandboxesInput) query() map[string]string {
+	q := map[string]string{
+		"external_workspace_id": in.ExternalWorkspaceID,
+		"external_user_id":      in.ExternalUserID,
+		"external_project_id":   in.ExternalProjectID,
+		"workspace_id":          in.WorkspaceID,
+		"project_id":            in.ProjectID,
+		"state":                 in.State,
+		"template_id":           in.TemplateID,
+		"search":                in.Search,
+		"sort":                  in.Sort,
+	}
+	for k, v := range in.Tags {
+		q["tags["+k+"]"] = v
+	}
+	if in.IncludeErrored != nil {
+		q["include_errored"] = fmt.Sprint(*in.IncludeErrored)
+	}
+	if in.Page > 0 {
+		q["page"] = fmt.Sprint(in.Page)
+	}
+	if in.Limit > 0 {
+		q["limit"] = fmt.Sprint(in.Limit)
+	}
+	return q
 }
 
 // SandboxUsage contains measured and provisioned usage for one sandbox.
@@ -217,8 +318,31 @@ type SandboxDeployInput struct {
 	IdempotencyKey     string                 `json:"-"`
 }
 
+// CreateSandboxResult is a created sandbox plus what the create response
+// headers say.
+type CreateSandboxResult struct {
+	Sandbox *Sandbox
+	// WaitOutcome is "ready" or "timeout" when WaitSeconds was used, else "".
+	WaitOutcome string
+	// BilledOrganizationID is the organization the create billed
+	// (X-Miosa-Bill-To), and BillToSource why ("request", "setting",
+	// "credential").
+	BilledOrganizationID string
+	BillToSource         BillToSource
+}
+
 // Create provisions a sandbox (a computer with the miosa-sandbox template).
 func (s *SandboxesService) Create(ctx context.Context, input CreateSandboxInput) (*Sandbox, error) {
+	res, err := s.CreateDetailed(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	return res.Sandbox, nil
+}
+
+// CreateDetailed is Create that also returns the response headers' data: how a
+// ?wait=N create ended, and which organization was billed.
+func (s *SandboxesService) CreateDetailed(ctx context.Context, input CreateSandboxInput) (*CreateSandboxResult, error) {
 	template := input.TemplateID
 	if template == "" {
 		template = input.Template
@@ -229,6 +353,14 @@ func (s *SandboxesService) Create(ctx context.Context, input CreateSandboxInput)
 	size, err := resolveSandboxSize(input)
 	if err != nil {
 		return nil, err
+	}
+	if input.SetupFile != "" {
+		if err := ValidateSetupFile(input.SetupFile); err != nil {
+			return nil, err
+		}
+	}
+	if input.WaitSeconds != 0 && (input.WaitSeconds < 2 || input.WaitSeconds > 120) {
+		return nil, fmt.Errorf("WaitSeconds must be between 2 and 120, got %d", input.WaitSeconds)
 	}
 
 	request := createSandboxRequest{
@@ -255,12 +387,38 @@ func (s *SandboxesService) Create(ctx context.Context, input CreateSandboxInput)
 		ExternalUserID:      input.ExternalUserID,
 		ExternalProjectID:   input.ExternalProjectID,
 		AllowProvision:      input.AllowProvision,
+		Environment:         input.Environment,
+		EnvironmentID:       input.EnvironmentID,
+		NoEnv:               input.NoEnv,
+		SetupFile:           input.SetupFile,
+		BillTo:              input.BillTo,
+	}
+	path := "/sandboxes"
+	client := s.client
+	switch {
+	case input.WaitSeconds > 0:
+		path += "?wait=" + strconv.Itoa(input.WaitSeconds)
+		// The wait happens inside the request, so the HTTP timeout must outlast it.
+		client = client.withMinTimeout(time.Duration(input.WaitSeconds+15) * time.Second)
+	case input.WaitForReady:
+		path += "?wait=true"
+		client = client.withMinTimeout(45 * time.Second)
+	}
+	headers := map[string]string{}
+	if key := input.IdempotencyKey; key != "" {
+		headers["Idempotency-Key"] = key
 	}
 	var response sandboxResponse
-	if err := s.client.postJSONIdempotent(ctx, "/sandboxes", request, &response, input.IdempotencyKey); err != nil {
+	hdr, _, err := client.sendJSONResponse(ctx, http.MethodPost, path, request, &response, headers)
+	if err != nil {
 		return nil, err
 	}
-	return &response.Data, nil
+	return &CreateSandboxResult{
+		Sandbox:              &response.Data,
+		WaitOutcome:          hdr.Get(HeaderWaitOutcome),
+		BilledOrganizationID: hdr.Get(HeaderBillTo),
+		BillToSource:         BillToSource(hdr.Get(HeaderBillToSource)),
+	}, nil
 }
 
 // Extend replaces the sandbox activity timeout and resets its deadline.
@@ -347,27 +505,41 @@ func (s *SandboxesService) Get(ctx context.Context, id string) (*Sandbox, error)
 	return &response.Data, nil
 }
 
-// List returns sandboxes owned by the authenticated tenant.
+// List returns sandboxes owned by the authenticated tenant: the first page
+// (50 by default). Use ListPage for paging metadata and ListAll to walk every page.
 func (s *SandboxesService) List(ctx context.Context, input ListSandboxesInput) ([]Sandbox, error) {
-	query := url.Values{}
-	if input.ExternalWorkspaceID != "" {
-		query.Set("external_workspace_id", input.ExternalWorkspaceID)
-	}
-	if input.ExternalUserID != "" {
-		query.Set("external_user_id", input.ExternalUserID)
-	}
-	if input.ExternalProjectID != "" {
-		query.Set("external_project_id", input.ExternalProjectID)
-	}
-	path := "/sandboxes"
-	if encoded := query.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
-	var response apiResponse[[]Sandbox]
-	if err := s.client.getJSON(ctx, path, &response); err != nil {
+	page, err := s.ListPage(ctx, input)
+	if err != nil {
 		return nil, err
 	}
-	return response.Data, nil
+	return page.Data, nil
+}
+
+// ListPage returns one page of sandboxes with its paging metadata.
+func (s *SandboxesService) ListPage(ctx context.Context, input ListSandboxesInput) (*SandboxPage, error) {
+	var page SandboxPage
+	if err := s.client.getJSON(ctx, "/sandboxes"+buildQuery(input.query()), &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+// ListAll walks every page of the filtered list and returns all sandboxes. Any
+// Page set on input is ignored.
+func (s *SandboxesService) ListAll(ctx context.Context, input ListSandboxesInput) ([]Sandbox, error) {
+	var all []Sandbox
+	input.Page = 1
+	for {
+		page, err := s.ListPage(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Data...)
+		if !page.Meta.HasNextPage || len(page.Data) == 0 {
+			return all, nil
+		}
+		input.Page++
+	}
 }
 
 // Usage returns measured runtime, provisioned vCPU time, and timeout visibility.

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"time"
 
@@ -21,7 +22,10 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "2.0.3"
+	sdkVersion        = "2.1.0"
+	// maxRetryHint is the longest server retry hint the client waits out
+	// itself. Longer hints are returned to the caller as the error.
+	maxRetryHint = 30 * time.Second
 )
 
 // ClientOption is a functional option for configuring a Client.
@@ -55,10 +59,26 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	maxRetries int
+	// defaultHeaders are sent on every request (see WithBillTo).
+	defaultHeaders map[string]string
+	// accessToken, when set, is sent as the bearer token instead of apiKey
+	// (an OAuth access token or session JWT).
+	accessToken string
+	// tenant is sent as X-MIOSA-Tenant.
+	tenant string
+	// userAgentSuffix is appended to the default user agent.
+	userAgentSuffix string
+	// userAgentOverride replaces the user agent entirely.
+	userAgentOverride string
 
 	// Services - populated by NewClient.
 	Computers           *ComputersService
 	Sandboxes           *SandboxesService
+	Bulk                *BulkService
+	SharedLinks         *SharedLinksService
+	Domains             *DomainsService
+	AuditLog            *AuditLogService
+	SandboxSpend        *SandboxSpendService
 	Devices             *DevicesService
 	Deployments         *DeploymentsService
 	DockerDeploy        *DockerDeployService
@@ -83,7 +103,6 @@ type Client struct {
 	Settings            *SettingsService
 	Dashboard           *DashboardService
 	Analytics           *AnalyticsService
-	AuditLog            *AuditLogService
 	Usage               *UsageService
 	Channels            *ChannelsService
 	Integrations        *IntegrationsService
@@ -113,7 +132,24 @@ type Client struct {
 	Audit   *EgressAuditService
 	// Phase 1-4 additions.
 	Quotas *QuotasService
-	Forge *ForgeService
+	Forge  *ForgeService
+	// Sprint 2026-10 additions.
+	Environments   *EnvironmentsService
+	Snapshots      *AccountSnapshotsService
+	NamedSnapshots *NamedSnapshotsService
+	BillTo         *BillToService
+	MemberCaps     *MemberCapsService
+	Agents         *AgentsService
+	AgentAccounts  *AgentAccountsService
+	Connections    *ConnectionsService
+	AIGateway      *AIGatewayService
+	// Multi-tenant platform building blocks.
+	ScopedTokens *ScopedTokensService
+	Policies     *PoliciesService
+	// ServiceAccounts manage non-human principals and their keys.
+	ServiceAccounts *ServiceAccountsService
+	// Events manages event subscriptions and reads the event outbox.
+	Events *EventSubscriptionsService
 }
 
 // newDefaultTransport builds an *http.Transport tuned for SDK use:
@@ -149,6 +185,11 @@ func newDefaultTransport() *http.Transport {
 // NewClient creates a new Client authenticated with the given API key.
 // Options are applied in order after defaults.
 //
+// An empty apiKey falls back to the MIOSA_API_KEY environment variable, and
+// the base URL falls back to MIOSA_BASE_URL when no WithBaseURL option is
+// given. MIOSA_ACCESS_TOKEN and MIOSA_TENANT likewise set the access token
+// and tenant header. Explicit arguments and options always win.
+//
 // The default *http.Client uses an HTTP/2-capable transport with a
 // keep-alive pool. The same client (and therefore the same connection
 // pool) is reused across every request the SDK makes — never construct
@@ -163,11 +204,35 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 		},
 		maxRetries: defaultMaxRetries,
 	}
+	if c.apiKey == "" {
+		c.apiKey = os.Getenv("MIOSA_API_KEY")
+	}
+	if v := os.Getenv("MIOSA_BASE_URL"); v != "" {
+		c.baseURL = v
+	}
+	if v := os.Getenv("MIOSA_ACCESS_TOKEN"); v != "" {
+		c.accessToken = v
+	}
+	if v := os.Getenv("MIOSA_TENANT"); v != "" {
+		c.tenant = v
+	}
 	for _, o := range opts {
 		o(c)
 	}
+	c.wire()
+	return c
+}
+
+// wire points every service at c. It runs once per client, including the
+// derived clients returned by With, so a derived client never calls through the
+// client it was derived from.
+func (c *Client) wire() {
 	c.Computers = &ComputersService{client: c}
-	c.Sandboxes = &SandboxesService{client: c}
+	c.Sandboxes = &SandboxesService{client: c, Batches: &SandboxBatchesService{client: c}}
+	c.Bulk = &BulkService{client: c}
+	c.SharedLinks = &SharedLinksService{client: c}
+	c.Domains = &DomainsService{client: c}
+	c.SandboxSpend = &SandboxSpendService{client: c}
 	c.Devices = &DevicesService{client: c}
 	c.Deployments = &DeploymentsService{client: c}
 	c.Files = &FilesService{client: c}
@@ -220,7 +285,67 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 	c.Audit = &EgressAuditService{client: c}
 	c.Quotas = &QuotasService{client: c}
 	c.Forge = &ForgeService{client: c}
-	return c
+	c.Environments = &EnvironmentsService{client: c}
+	c.Snapshots = &AccountSnapshotsService{client: c}
+	c.NamedSnapshots = &NamedSnapshotsService{client: c}
+	c.BillTo = &BillToService{client: c}
+	c.MemberCaps = &MemberCapsService{client: c}
+	c.Agents = &AgentsService{client: c}
+	c.AgentAccounts = &AgentAccountsService{client: c}
+	c.Connections = &ConnectionsService{client: c}
+	c.AIGateway = &AIGatewayService{client: c}
+	c.ScopedTokens = &ScopedTokensService{client: c}
+	c.Policies = &PoliciesService{client: c}
+	c.ServiceAccounts = &ServiceAccountsService{client: c}
+	c.Events = &EventSubscriptionsService{client: c}
+}
+
+// With returns a client that shares this one's HTTP transport and connection
+// pool but applies extra options. Use it to act as a different end user,
+// organization or bill-to without building a second pool:
+//
+//	userClient := admin.With(miosa.WithAccessToken(scopedToken))
+func (c *Client) With(opts ...ClientOption) *Client {
+	cp := *c
+	if c.defaultHeaders != nil {
+		cp.defaultHeaders = make(map[string]string, len(c.defaultHeaders))
+		for k, v := range c.defaultHeaders {
+			cp.defaultHeaders[k] = v
+		}
+	}
+	for _, o := range opts {
+		o(&cp)
+	}
+	cp.wire()
+	return &cp
+}
+
+// AsUser returns a client that authenticates with an end user's scoped token
+// (see ScopedTokensService.Mint) instead of this client's API key. It shares
+// the transport. Every call it makes is limited to that token's workspace and
+// scopes.
+func (c *Client) AsUser(token string) *Client {
+	return c.With(WithAccessToken(token))
+}
+
+// ForTenant returns a client that acts in the given organization
+// (X-MIOSA-Tenant). The credential must belong to it.
+func (c *Client) ForTenant(tenantID string) *Client {
+	return c.With(WithTenant(tenantID))
+}
+
+// withMinTimeout returns a shallow copy of the client whose HTTP timeout is at
+// least d. It shares the connection pool. Used by calls that legitimately hold
+// the request open (a create that waits for readiness).
+func (c *Client) withMinTimeout(d time.Duration) *Client {
+	if c.httpClient.Timeout == 0 || c.httpClient.Timeout >= d {
+		return c
+	}
+	hc := *c.httpClient
+	hc.Timeout = d
+	cp := *c
+	cp.httpClient = &hc
+	return &cp
 }
 
 // ─── Core HTTP helpers ────────────────────────────────────────────────────────
@@ -228,61 +353,7 @@ func NewClient(apiKey string, opts ...ClientOption) *Client {
 // do executes an HTTP request with retry logic for retryable errors.
 // The response body is the caller's responsibility to close.
 func (c *Client) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	var lastErr error
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		if attempt > 0 {
-			delay := backoff(attempt)
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-
-		// Buffer the body so it can be re-read on retry.
-		var bodyReader io.Reader
-		if body != nil {
-			if seeker, ok := body.(io.ReadSeeker); ok {
-				if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-					return nil, fmt.Errorf("failed to rewind request body: %w", err)
-				}
-				bodyReader = seeker
-			} else {
-				bodyReader = body
-			}
-		}
-
-		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build request: %w", err)
-		}
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.httpClient.Do(req)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			lastErr = &ConnectionError{Cause: err}
-			continue
-		}
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			apiErr := errorFromResponse(resp)
-			if isRetryable(apiErr) && attempt < c.maxRetries {
-				lastErr = apiErr
-				continue
-			}
-			return nil, apiErr
-		}
-		return resp, nil
-	}
-	return nil, lastErr
+	return c.doWithHeaders(ctx, method, path, body, nil)
 }
 
 // getJSON issues a GET request and JSON-decodes the response into out.
@@ -360,6 +431,14 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
 			delay := backoff(attempt)
+			if hint, ok := RetryAfter(lastErr); ok {
+				// The server said when to come back. A hint longer than the
+				// retry ceiling means retrying now would only fail again.
+				if hint > maxRetryHint {
+					return nil, lastErr
+				}
+				delay = hint
+			}
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
@@ -383,8 +462,7 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 		if err != nil {
 			return nil, fmt.Errorf("failed to build request: %w", err)
 		}
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
+		c.setAuthHeaders(ctx, req.Header)
 		if body != nil {
 			req.Header.Set("Content-Type", "application/json")
 		}
@@ -399,12 +477,17 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body io
 				return nil, ctx.Err()
 			}
 			lastErr = &ConnectionError{Cause: err}
+			if !retrySafe(method, headers) {
+				// The request may have reached the server; repeating a
+				// non-idempotent call could do it twice.
+				return nil, lastErr
+			}
 			continue
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			apiErr := errorFromResponse(resp)
-			if isRetryable(apiErr) && attempt < c.maxRetries {
+			if shouldRetry(method, headers, apiErr) && attempt < c.maxRetries {
 				lastErr = apiErr
 				continue
 			}
@@ -438,8 +521,7 @@ func (c *Client) postMultipart(ctx context.Context, path string, body io.ReadSee
 	if err != nil {
 		return fmt.Errorf("failed to build request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
+	c.setAuthHeaders(ctx, req.Header)
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 

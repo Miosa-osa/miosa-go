@@ -82,10 +82,9 @@ func (s *SnapshotsService) Events(ctx context.Context, id, ticket string) (*Snap
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+s.client.apiKey)
+	s.client.setAuthHeaders(ctx, req.Header)
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
 
 	resp, err := s.client.httpClient.Do(req)
 	if err != nil {
@@ -166,14 +165,15 @@ func parseSnapshotSSE(ctx context.Context, resp *http.Response, ch chan<- Snapsh
 
 // ─── Client-level restore ─────────────────────────────────────────────────────
 
-// RestoreComputer provisions a fresh computer from the given snapshot ID.
-// The new computer starts in "provisioning" status.
+// RestoreComputer provisions a fresh computer from the given snapshot ID
+// (POST /snapshots/:id/fork). The new computer starts in "provisioning" status.
+// For environment options and sandboxes use Client.Snapshots.Fork.
 func (c *Client) RestoreComputer(ctx context.Context, snapshotID string) (*Computer, error) {
 	const op = "Client.RestoreComputer"
 	var out struct {
 		Data ComputerData `json:"data"`
 	}
-	if err := c.postJSON(ctx, fmt.Sprintf("/snapshots/%s/restore", snapshotID), nil, &out); err != nil {
+	if err := c.postJSON(ctx, fmt.Sprintf("/snapshots/%s/fork", snapshotID), nil, &out); err != nil {
 		return nil, fmt.Errorf("%s: %w", op, err)
 	}
 	return c.Computers.wrap(out.Data), nil

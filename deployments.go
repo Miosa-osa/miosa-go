@@ -33,10 +33,10 @@ type ListDeploymentsInput struct {
 }
 
 // CreateDeploymentInput is the request body for POST /deployments
-// (or /projects/:id/deployments).
+// (ProjectID rides in the body; there is no per-project create route).
 type CreateDeploymentInput struct {
 	Name                string                 `json:"name"`
-	ProjectID           string                 `json:"-"`
+	ProjectID           string                 `json:"project_id,omitempty"`
 	SourceType          DeploymentSourceType   `json:"source_type,omitempty"`
 	RepoURL             string                 `json:"repo_url,omitempty"`
 	Branch              string                 `json:"branch,omitempty"`
@@ -221,12 +221,8 @@ func (s *DeploymentsService) Prove(ctx context.Context, deploymentID string) (*D
 
 // Create provisions a new deployment.
 func (s *DeploymentsService) Create(ctx context.Context, input CreateDeploymentInput) (*DeploymentData, error) {
-	path := "/deployments"
-	if input.ProjectID != "" {
-		path = "/projects/" + input.ProjectID + "/deployments"
-	}
 	var env apiResponse[DeploymentData]
-	if err := s.client.postJSONIdempotent(ctx, path, input, &env, idemKey(input.IdempotencyKey)); err != nil {
+	if err := s.client.postJSONIdempotent(ctx, "/deployments", input, &env, idemKey(input.IdempotencyKey)); err != nil {
 		return nil, err
 	}
 	return &env.Data, nil

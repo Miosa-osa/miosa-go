@@ -334,8 +334,7 @@ func tryReadinessStream(ctx context.Context, c *Client, id string) (bool, bool) 
 	if err != nil {
 		return false, false
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("User-Agent", "miosa-go/"+sdkVersion)
+	c.setAuthHeaders(ctx, req.Header)
 	req.Header.Set("Accept", "text/event-stream")
 
 	resp, err := c.httpClient.Do(req)

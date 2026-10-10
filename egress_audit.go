@@ -283,8 +283,7 @@ func (b *SandboxAuditBinding) Tail(ctx context.Context, opts TailOptions) (*Audi
 	}
 
 	headers := http.Header{}
-	headers.Set("Authorization", "Bearer "+b.client.apiKey)
-	headers.Set("User-Agent", "miosa-go/"+sdkVersion)
+	b.client.setAuthHeaders(tailCtx, headers)
 
 	dialer := &websocket.Dialer{
 		Subprotocols:     []string{auditWsSubprotocol},
