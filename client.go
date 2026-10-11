@@ -22,7 +22,7 @@ const (
 	defaultBaseURL    = "https://api.miosa.ai/api/v1"
 	defaultTimeout    = 60 * time.Second
 	defaultMaxRetries = 3
-	sdkVersion        = "2.1.0"
+	sdkVersion        = "2.2.0"
 	// maxRetryHint is the longest server retry hint the client waits out
 	// itself. Longer hints are returned to the caller as the error.
 	maxRetryHint = 30 * time.Second

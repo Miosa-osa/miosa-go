@@ -3,7 +3,9 @@ package miosa
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/url"
 )
 
 // ─── Screenshot ───────────────────────────────────────────────────────────────
@@ -111,11 +113,11 @@ func (c *Computer) DesktopWait(ctx context.Context, seconds float64) error {
 
 // Windows returns the list of open windows on the desktop.
 func (c *Computer) Windows(ctx context.Context) ([]WindowInfo, error) {
-	var out []WindowInfo
-	if err := c.client.getJSON(ctx, fmt.Sprintf("/computers/%s/desktop/windows", c.ID), &out); err != nil {
+	var raw json.RawMessage
+	if err := c.client.getJSON(ctx, fmt.Sprintf("/computers/%s/desktop/windows", c.ID), &raw); err != nil {
 		return nil, err
 	}
-	return out, nil
+	return decodeWindows(raw)
 }
 
 // Cursor returns the current cursor position.
@@ -134,20 +136,50 @@ func (c *Computer) FocusWindow(ctx context.Context, windowID string) error {
 
 // Launch opens an application by name.
 func (c *Computer) Launch(ctx context.Context, appName string) error {
-	return c.desktopPost(ctx, "launch", LaunchInput{AppName: appName})
+	return c.desktopPost(ctx, "launch", LaunchInput{App: appName, AppName: appName})
 }
 
 // ─── Internal helper ─────────────────────────────────────────────────────────
 
 // desktopPost is a convenience wrapper for POST /computers/{id}/desktop/{action}.
 func (c *Computer) desktopPost(ctx context.Context, action string, body interface{}) error {
+	_, err := c.desktopDo(ctx, action, body)
+	return err
+}
+
+// desktopDo posts a desktop action and reports how the agent answered.
+func (c *Computer) desktopDo(ctx context.Context, action string, body interface{}) (*DesktopActionResult, error) {
 	var out DesktopActionResult
-	path := fmt.Sprintf("/computers/%s/desktop/%s", c.ID, action)
+	path := fmt.Sprintf("/computers/%s/desktop/%s", url.PathEscape(c.ID), action)
 	if err := c.client.postJSON(ctx, path, body, &out); err != nil {
-		return err
+		return nil, err
 	}
-	if !out.Success {
-		return fmt.Errorf("desktop action %q returned success=false", action)
+	if !out.OK() {
+		msg := out.Error
+		if msg == "" {
+			msg = out.Message
+		}
+		return &out, fmt.Errorf("desktop action %q failed: %s", action, msg)
 	}
-	return nil
+	return &out, nil
+}
+
+// decodeWindows reads the window list in any shape the agent has used:
+// {"windows": [...]}, {"data": [...]} or a bare array.
+func decodeWindows(raw json.RawMessage) ([]WindowInfo, error) {
+	var list []WindowInfo
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return list, nil
+	}
+	var wrapped struct {
+		Windows []WindowInfo `json:"windows"`
+		Data    []WindowInfo `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, err
+	}
+	if wrapped.Windows != nil {
+		return wrapped.Windows, nil
+	}
+	return wrapped.Data, nil
 }

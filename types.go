@@ -1,5 +1,7 @@
 package miosa
 
+import "encoding/json"
+
 // ─── Computers ───────────────────────────────────────────────────────────────
 
 // ComputerSize is the hardware tier for a computer.
@@ -167,24 +169,93 @@ type WindowFocusInput struct {
 }
 
 // LaunchInput is the request body for POST /desktop/launch.
+//
+// envd reads "app" (and optional "args"); app_name is kept for older agents.
 type LaunchInput struct {
-	AppName string `json:"app_name"`
+	App     string   `json:"app"`
+	AppName string   `json:"app_name,omitempty"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // DesktopActionResult is the common response for mutating desktop actions.
+//
+// The agent answers {"status":"ok"} on success; the API gateway's own actions
+// answer {"success":true}. OK accepts both, and a body with neither field as
+// long as it carries no error.
 type DesktopActionResult struct {
-	Success bool `json:"success"`
+	Success bool   `json:"success"`
+	Status  string `json:"status,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+	// WaitedSeconds is set by the wait action.
+	WaitedSeconds float64 `json:"waited_seconds,omitempty"`
+
+	hasSuccess bool
+}
+
+// UnmarshalJSON records whether the body said anything about success.
+func (r *DesktopActionResult) UnmarshalJSON(b []byte) error {
+	type plain DesktopActionResult
+	var probe struct {
+		Success *bool `json:"success"`
+	}
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(b, (*plain)(r)); err != nil {
+		return err
+	}
+	r.hasSuccess = probe.Success != nil
+	return nil
+}
+
+// OK reports whether the agent performed the action.
+func (r DesktopActionResult) OK() bool {
+	if r.Error != "" {
+		return false
+	}
+	if r.hasSuccess {
+		return r.Success
+	}
+	return r.Status == "" || r.Status == "ok"
 }
 
 // WindowInfo describes an open window on the desktop.
+//
+// envd names a window with "name"; Title carries the same text for callers that
+// used the older field. IsFocused is only set when the agent reports it.
 type WindowInfo struct {
 	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
 	Title     string `json:"title"`
+	App       string `json:"app,omitempty"`
 	X         int    `json:"x"`
 	Y         int    `json:"y"`
 	Width     int    `json:"width"`
 	Height    int    `json:"height"`
 	IsFocused bool   `json:"is_focused"`
+}
+
+// UnmarshalJSON accepts name or title, and is_focused or focused.
+func (w *WindowInfo) UnmarshalJSON(b []byte) error {
+	type plain WindowInfo
+	aux := struct {
+		*plain
+		Focused *bool `json:"focused"`
+	}{plain: (*plain)(w)}
+	if err := json.Unmarshal(b, &aux); err != nil {
+		return err
+	}
+	if w.Title == "" {
+		w.Title = w.Name
+	}
+	if w.Name == "" {
+		w.Name = w.Title
+	}
+	if aux.Focused != nil {
+		w.IsFocused = *aux.Focused
+	}
+	return nil
 }
 
 // CursorInfo reports the current cursor position.

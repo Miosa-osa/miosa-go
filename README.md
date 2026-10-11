@@ -390,6 +390,29 @@ traces, _ := client.AIGateway.Requests(ctx, miosa.GatewayRequestsOptions{Status:
 started, _ := client.OpenComputers.Jobs.Start(ctx, hostID, miosa.StartJobInput{Command: "make test", TimeoutSeconds: 300})
 ```
 
+## Desktop control and Claude computer use
+
+```go
+comp, _ := client.Computers.Get(ctx, id)
+_ = comp.WaitForDesktop(ctx, miosa.WaitOptions{Timeout: 90 * time.Second})
+
+shot, _ := comp.Act(ctx, "screenshot", miosa.ActionParams{})       // typed result with the image
+_, _ = comp.Act(ctx, "key", miosa.ActionParams{Text: "ctrl+s"})
+state, _ := comp.Look(ctx, miosa.LookOptions{})                    // screenshot + accessibility tree
+viewer, _ := comp.ViewerURL(ctx, 15*time.Minute)                   // embeddable link, typed expiry
+```
+
+`Act` takes the member names and parameters Anthropic's computer-use toolset uses.
+The `computeruse` package turns that into a ready tool loop piece:
+
+```go
+ts, _ := computeruse.New(comp, computeruse.Config{Confirm: approve})
+tools := ts.Tools()                      // [{"type":"computer_toolset_20260801"}]
+results := ts.ExecuteBatch(ctx, uses)    // tool_result blocks; stops at the first failure
+```
+
+The individual methods are also there: `Hotkey`, `KeyDown`, `KeyUp`, `MouseMove`, `ScreenSize`, `DesktopInfo`, `Clipboard`, `SetClipboard`, `SetWallpaper`, `AccessibilityTree`, and window `Size`, `Position`, `Resize`, `Move`, `Maximize`, `Minimize`, `Close`.
+
 ## Multi-tenant platforms
 
 A step-by-step guide, including batch create, bulk actions, spend caps and viewer sessions, is in [docs/multi-tenant-platform.md](docs/multi-tenant-platform.md).
